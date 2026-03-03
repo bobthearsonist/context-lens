@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -501,6 +501,12 @@ if (parsedArgs.commandName === "analyze") {
         if (childEnv.SSL_CERT_FILE === "") childEnv.SSL_CERT_FILE = certPath;
         if (childEnv.NODE_EXTRA_CA_CERTS === "")
           childEnv.NODE_EXTRA_CA_CERTS = certPath;
+        // On macOS, Codex is compiled with rustls + native-roots, which reads
+        // the system Keychain and ignores SSL_CERT_FILE entirely. If the cert
+        // is not trusted in the Keychain, Codex cannot connect through mitmproxy.
+        if (platform() === "darwin" && commandName === "codex") {
+          warnIfMitmCertNotTrustedMacOs(certPath);
+        }
       } else {
         console.error(
           `Warning: mitmproxy CA cert not found at ${certPath}. Run 'mitmdump' once to generate it.`,
@@ -878,6 +884,33 @@ if (parsedArgs.commandName === "analyze") {
         err instanceof Error ? err.message : String(err),
       );
       return targetDir;
+    }
+  }
+
+  // On macOS, Codex uses rustls with native-roots (the system Keychain) and
+  // completely ignores SSL_CERT_FILE. If the mitmproxy CA cert is not trusted
+  // in the Keychain, Codex will fail to connect through mitmproxy with a
+  // "stream disconnected before completion" error. Check and warn.
+  function warnIfMitmCertNotTrustedMacOs(certPath: string): void {
+    try {
+      // `security verify-cert` exits 0 when the cert chain is trusted by macOS.
+      const result = spawnSync("security", ["verify-cert", "-c", certPath], {
+        stdio: "pipe",
+      });
+      if (result.status !== 0) {
+        console.error(
+          "\n⚠️  mitmproxy CA cert is not trusted in the macOS Keychain.",
+        );
+        console.error(
+          "   Codex uses the system certificate store (not SSL_CERT_FILE).",
+        );
+        console.error("   Run this once to trust it, then retry:");
+        console.error(
+          `   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}\n`,
+        );
+      }
+    } catch {
+      // Non-fatal: if 'security' isn't available, skip the check.
     }
   }
 
@@ -1325,12 +1358,26 @@ async function runDoctor(): Promise<number> {
   );
 
   const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
+  const certExists = fs.existsSync(certPath);
   info(
     "mitm CA cert (Codex, pi --mitm)",
-    fs.existsSync(certPath)
-      ? certPath
-      : "not present (run 'mitmdump' once to generate)",
+    certExists ? certPath : "not present (run 'mitmdump' once to generate)",
   );
+  if (certExists && platform() === "darwin") {
+    try {
+      const result = spawnSync("security", ["verify-cert", "-c", certPath], {
+        stdio: "pipe",
+      });
+      info(
+        "mitm CA cert trusted in macOS Keychain",
+        result.status === 0
+          ? "yes"
+          : `NO — Codex will fail. Fix: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}`,
+      );
+    } catch {
+      // Non-fatal.
+    }
+  }
 
   const contextDir = join(homedir(), ".context-lens");
   const dataDir = join(contextDir, "data");
