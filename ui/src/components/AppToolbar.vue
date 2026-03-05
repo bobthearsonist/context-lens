@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
 import { getExportUrl, uploadToContextlensIo } from '@/api'
@@ -37,6 +37,20 @@ const showResetMenu = ref(false)
 const sessionIdCopied = ref(false)
 const uploading = ref(false)
 const uploadError = ref<string | null>(null)
+
+// Shared mode: expiry countdown
+const now = ref(Date.now())
+let _nowTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => { _nowTimer = setInterval(() => { now.value = Date.now() }, 60_000) })
+onBeforeUnmount(() => { if (_nowTimer) clearInterval(_nowTimer) })
+
+const sharedExpiryDays = computed(() => {
+  if (!store.isSharedMode || !store.summaries.length) return null
+  const firstSeen = new Date(store.summaries[0].firstSeen).getTime()
+  const expiresAt = firstSeen + 7 * 24 * 60 * 60 * 1000
+  const msLeft = expiresAt - now.value
+  return Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000)))
+})
 
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
@@ -291,7 +305,11 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 
     <!-- ═══ Right: global controls ═══ -->
     <div class="toolbar-right">
-      <span class="connection" :class="{ live: store.connected }">
+      <span v-if="store.isSharedMode" class="connection shared" :class="{ expiring: sharedExpiryDays !== null && sharedExpiryDays <= 1 }">
+        <i class="i-carbon-share" />
+        Shared{{ sharedExpiryDays !== null ? ` · ${sharedExpiryDays}d left` : '' }}
+      </span>
+      <span v-else class="connection" :class="{ live: store.connected }">
         <span class="connection-dot" />
         {{ store.connected ? 'Live' : 'Offline' }}
       </span>
@@ -629,6 +647,12 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   color: var(--text-muted);
 
   &.live { color: var(--text-dim); }
+
+  &.shared {
+    color: var(--accent-blue);
+    i { font-size: 10px; }
+    &.expiring { color: var(--accent-yellow, #f59e0b); }
+  }
 }
 
 .connection-dot {
