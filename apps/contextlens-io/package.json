@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:ui": "cd ../../ui && pnpm run build && cd - && rm -rf ui-dist && cp -r ../../ui/dist ui-dist",
+    "build:full": "pnpm run build && pnpm run build:ui",
     "dev": "tsc --watch",
     "start": "node dist/server.js"
   },

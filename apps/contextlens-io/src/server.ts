@@ -41,11 +41,16 @@ setInterval(() => {
 
 const app = new Hono();
 
-// Allow the local context-lens UI to call this endpoint.
+// Allow the local context-lens UI and the production domain to call this endpoint.
 app.use(
   "/api/*",
   cors({
-    origin: ["http://localhost:4041", "http://localhost:5173"],
+    origin: [
+      "http://localhost:4041",
+      "http://localhost:5173",
+      "https://contextlens.io",
+      "https://www.contextlens.io",
+    ],
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type"],
   }),

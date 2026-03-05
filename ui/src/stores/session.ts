@@ -23,6 +23,7 @@ import {
 } from '@/api'
 import type { TagInfo } from '@/api-types'
 import { classifyEntries } from '@/utils/messages'
+import { loadSharedSession } from '@/utils/shared-session'
 
 export type ViewMode = 'inspector' | 'dashboard' | 'compare'
 export type InspectorTab = 'overview' | 'messages' | 'timeline'
@@ -32,6 +33,9 @@ export type SelectionMode = 'live' | 'pinned'
 const DENSITY_STORAGE_KEY = 'context-lens-density'
 
 export const useSessionStore = defineStore('session', () => {
+  // --- Shared viewer mode (contextlens.io) ---
+  const isSharedMode = ref(false)
+
   // --- Data ---
   const revision = ref(0)
   const summaries = ref<ConversationSummary[]>([])
@@ -204,6 +208,35 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   // --- Actions ---
+
+  /**
+   * Load a shared session from a contextlens.io share URL.
+   * Populates the store from the LHAR file and enables shared mode
+   * (disables SSE, polling, and all mutation actions).
+   */
+  async function loadShared(dataUrl: string) {
+    loading.value = true
+    error.value = null
+    try {
+      const { conversations, summaries: newSummaries } = await loadSharedSession(dataUrl)
+      isSharedMode.value = true
+      summaries.value = newSummaries
+      const map = new Map<string, ConversationGroup>()
+      for (const c of conversations) {
+        map.set(c.id, c)
+      }
+      loadedConversations.value = map
+      if (newSummaries.length > 0) {
+        view.value = 'inspector'
+        await selectSession(newSummaries[0].id)
+      }
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function load() {
     loading.value = true
     error.value = null
@@ -638,6 +671,10 @@ export const useSessionStore = defineStore('session', () => {
     selectedEntry,
     totalCost,
     totalRequests,
+
+    // Shared mode
+    isSharedMode,
+    loadShared,
 
     // Actions
     load,

@@ -212,19 +212,26 @@ watch(
 onMounted(async () => {
   try {
     store.initializeDensity()
-    await store.load()
-    if (!window.location.hash) {
-      window.location.hash = HASH_SESSIONS
-    }
-    await applyHashRoute()
-    window.addEventListener('hashchange', onHashChange)
 
-    // Periodic refresh to catch any missed SSE events or handle disconnections
-    refreshInterval = setInterval(() => {
-      if (!document.hidden) {
-        store.load()
+    const sharedUrl = (window as unknown as Record<string, unknown>).__CONTEXTLENS_SHARED_SESSION_URL__ as string | undefined
+    if (sharedUrl) {
+      // Shared viewer mode: load from contextlens.io, no SSE or polling
+      await store.loadShared(sharedUrl)
+    } else {
+      await store.load()
+      if (!window.location.hash) {
+        window.location.hash = HASH_SESSIONS
       }
-    }, 5000) // Refresh every 5 seconds when tab is visible
+      await applyHashRoute()
+      window.addEventListener('hashchange', onHashChange)
+
+      // Periodic refresh to catch any missed SSE events or handle disconnections
+      refreshInterval = setInterval(() => {
+        if (!document.hidden) {
+          store.load()
+        }
+      }, 5000) // Refresh every 5 seconds when tab is visible
+    }
   } finally {
     appReady.value = true
   }
