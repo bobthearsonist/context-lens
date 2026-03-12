@@ -40,6 +40,25 @@ export async function resetAll(): Promise<void> {
   if (!res.ok) throw new Error(`POST /api/reset failed: ${res.status}`)
 }
 
+export async function pasteRequest(json: string): Promise<{ conversationId: string | null }> {
+  let body: unknown
+  try {
+    body = JSON.parse(json)
+  } catch {
+    throw new Error('Invalid JSON — paste a raw Anthropic or OpenAI request body')
+  }
+  const res = await fetch(`${BASE}/api/paste`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error ?? `POST /api/paste failed: ${res.status}`)
+  }
+  return res.json()
+}
+
 export type ExportPrivacy = 'minimal' | 'standard' | 'full'
 
 export function getExportUrl(format: 'lhar' | 'lhar.json', conversationId?: string, privacy?: ExportPrivacy): string {

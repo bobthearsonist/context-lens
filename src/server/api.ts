@@ -5,6 +5,7 @@ import * as v from "valibot";
 
 import { ingestCapture } from "../analysis/ingest.js";
 import { computeFingerprint, extractSessionId } from "../core/conversation.js";
+import { classifyRequest } from "../core/routing.js";
 import { parseContextInfo } from "../core.js";
 import { toLharJson, toLharJsonl } from "../lhar.js";
 import {
@@ -181,6 +182,78 @@ export function createApiApp(store: Store): Hono {
     const message = v.summarize(legacyResult.issues);
     console.error("Ingest validation error:", message);
     return c.json({ error: message }, 400);
+  });
+
+  // --- Paste (manual request analysis) ---
+
+  app.post("/api/paste", async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "Request body must be a JSON object" }, 400);
+    }
+
+    // Auto-detect provider and format from the request body structure.
+    // Anthropic requests have a "messages" array and no "input" field (Responses API).
+    // OpenAI chat completions have "messages". OpenAI Responses API has "input".
+    // We use path heuristics based on common field presence.
+    let pathname = "/v1/messages"; // default: assume Anthropic
+    if ("input" in body) {
+      pathname = "/responses";
+    } else if ("messages" in body) {
+      // Could be Anthropic or OpenAI chat completions — check for Anthropic-specific fields
+      if (!("anthropic_version" in body) && !("system" in body)) {
+        pathname = "/v1/chat/completions";
+      }
+    } else if ("contents" in body || "generationConfig" in body) {
+      pathname = "/v1beta/models/gemini:generateContent";
+    }
+
+    const { provider, apiFormat } = classifyRequest(pathname, {});
+
+    ingestCapture(store, {
+      provider,
+      apiFormat,
+      source: "paste",
+      path: pathname,
+      method: "POST",
+      timestamp: new Date().toISOString(),
+      requestBody: body as JsonValue,
+      responseBody: "",
+      responseStatus: 200,
+      responseIsStreaming: false,
+      targetUrl: "",
+      requestHeaders: {},
+      responseHeaders: {},
+      timings: { send_ms: 0, wait_ms: 0, receive_ms: 0, total_ms: 0 },
+      requestBytes: 0,
+      responseBytes: 0,
+      sessionId: null,
+    });
+
+    // Find the most recently ingested conversation (just added above)
+    const { grouped } = buildConversationGroups(store);
+    let latestId: string | null = null;
+    let latestTime = 0;
+    for (const [id, entries] of grouped) {
+      const t = Math.max(
+        ...entries.map((e) => new Date(e.timestamp).getTime()),
+      );
+      if (t > latestTime) {
+        latestTime = t;
+        latestId = id;
+      }
+    }
+
+    console.log(
+      `  📋 Pasted: [${provider}/${apiFormat}] → session ${latestId}`,
+    );
+    return c.json({ ok: true, conversationId: latestId });
   });
 
   // --- Entry detail ---

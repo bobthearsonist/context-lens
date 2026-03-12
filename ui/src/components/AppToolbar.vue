@@ -4,6 +4,9 @@ import { useSessionStore } from '@/stores/session'
 import { fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
 import { getExportUrl, uploadToContextlensIo } from '@/api'
 import TagEditor from '@/components/TagEditor.vue'
+import PasteModal from '@/components/PasteModal.vue'
+
+const showPasteModal = ref(false)
 
 const showTagEditor = ref(false)
 const toolbarTagsEl = ref<HTMLElement>()
@@ -329,6 +332,10 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         </span>
       </template>
 
+      <button class="toolbar-control" @click="showPasteModal = true">
+        <i class="i-carbon-paste" /> Paste
+      </button>
+
       <div v-if="hasRequests" class="toolbar-dropdown">
         <button class="toolbar-control" @click="toggleExportMenu">
           <i class="i-carbon-download" /> Export
@@ -377,6 +384,10 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </div>
     </div>
   </header>
+
+  <Teleport to="body">
+    <PasteModal v-if="showPasteModal" @close="showPasteModal = false" />
+  </Teleport>
 </template>
 
 <style lang="scss" scoped>
@@ -793,6 +804,9 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 .dropdown-leave-active { transition: opacity 0.08s, transform 0.08s; }
 .dropdown-enter-from,
 .dropdown-leave-to { opacity: 0; transform: translateY(-4px); }
+
+// ── Paste modal (teleported) ──
+// (rendered via <Teleport> in template, no scoped styles needed)
 
 // ── Compare mode ──
 .compare-label {
