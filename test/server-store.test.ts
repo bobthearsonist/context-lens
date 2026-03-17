@@ -377,8 +377,8 @@ describe("Store", () => {
 
     // Authoritative context total is input + cache read + cache write.
     assert.equal(entry.contextInfo.totalTokens, 1400);
-    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$0.75/M = $0.00387
-    assert.equal(entry.costUsd, 0.00387);
+    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$3.75/M = $0.00507
+    assert.equal(entry.costUsd, 0.00507);
 
     cleanup();
   });
