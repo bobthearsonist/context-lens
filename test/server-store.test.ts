@@ -395,7 +395,11 @@ describe("Store", () => {
     // 429 rate-limited response: no usage, should not be billed
     const entry429 = store.storeRequest(
       ci,
-      { type: "error", error: { type: "rate_limit_error", message: "Too many requests" } } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: test fixture passes error shape not in response union
+      {
+        type: "error",
+        error: { type: "rate_limit_error", message: "Too many requests" },
+      } as any,
       "claude",
       body,
       { httpStatus: 429 },
@@ -405,7 +409,11 @@ describe("Store", () => {
     // 500 server error: should also not be billed
     const entry500 = store.storeRequest(
       ci,
-      { type: "error", error: { type: "server_error", message: "Internal error" } } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: test fixture passes error shape not in response union
+      {
+        type: "error",
+        error: { type: "server_error", message: "Internal error" },
+      } as any,
       "claude",
       body,
       { httpStatus: 500 },
@@ -688,11 +696,14 @@ describe("Store", () => {
     // appended by appendToState for the new entry.
     // Since appendToState re-appends the surviving conversation,
     // loadState handles duplicates, so total conversation lines = 2.
-    const convoLines = lines.filter((l) => JSON.parse(l).type === "conversation");
     const entryLines = lines.filter((l) => JSON.parse(l).type === "entry");
 
     // The evicted conversation's entries must NOT be in the state file
-    assert.equal(entryLines.length, 1, "only the surviving entry should be in state file");
+    assert.equal(
+      entryLines.length,
+      1,
+      "only the surviving entry should be in state file",
+    );
 
     // Reload into a fresh store and verify
     const store2 = new Store({
@@ -815,7 +826,7 @@ describe("Store", () => {
       body2,
     );
     // Delete the second conversation to trigger saveState
-    const secondConvoId = store2.getCapturedRequests()[0].conversationId!;
+    const secondConvoId = store2.getCapturedRequests()[0].conversationId ?? "";
     store2.deleteConversation(secondConvoId);
 
     // Load again from the rewritten file
