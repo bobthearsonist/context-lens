@@ -26,6 +26,7 @@ import {
   projectTurnsRemaining,
 } from '@/utils/timeline'
 
+
 const store = useSessionStore()
 
 type TimelineMode = 'all' | 'main'
@@ -34,6 +35,7 @@ const stackMode = computed({ get: () => store.timelineStackMode, set: (v) => { s
 const hiddenLegendKeys = computed({ get: () => store.timelineHiddenLegendKeys, set: (v) => { store.timelineHiddenLegendKeys = v } })
 const showLimitOverlay = computed({ get: () => store.timelineShowLimitOverlay, set: (v) => { store.timelineShowLimitOverlay = v } })
 const showCacheOverlay = computed({ get: () => store.timelineShowCacheOverlay, set: (v) => { store.timelineShowCacheOverlay = v } })
+
 const tokenChartScrollEl = ref<HTMLElement | null>(null)
 const costChartScrollEl = ref<HTMLElement | null>(null)
 
@@ -318,6 +320,7 @@ watch(
             <span class="legend-dot legend-dot--cache" />
             Cache
           </button>
+
           <button v-if="stackMode === 'absolute'" class="overlay-toggle" :class="{ on: showLimitOverlay }" @click="showLimitOverlay = !showLimitOverlay">
             <span class="legend-dot legend-dot--dashed" />
             Limit
@@ -389,6 +392,7 @@ watch(
                   opacity="0.7"
                 />
               </svg>
+
 
             </div>
 
@@ -861,6 +865,8 @@ watch(
   background: var(--accent-cyan);
   opacity: 0.7;
 }
+
+
 
 // ── Cache hit rate line overlay ──
 .cache-line-svg {

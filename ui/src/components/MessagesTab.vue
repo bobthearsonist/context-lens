@@ -476,6 +476,10 @@ async function showSubagentDetail(entryId: number) {
   detailOpen.value = true
 }
 
+function isOversizedResult(msg: ParsedMessage): boolean {
+  return classifyMessageRole(msg) === 'tool_results' && (msg.tokens || 0) > 8_000
+}
+
 function toolResultName(msg: ParsedMessage): string | null {
   if (classifyMessageRole(msg) !== 'tool_results') return null
   for (const block of msg.contentBlocks || []) {
@@ -915,7 +919,7 @@ watch(
               >
                 <span class="msg-role">{{ item.msg.role === 'user' ? '›' : item.msg.role === 'assistant' ? '‹' : '·' }}</span>
                 <span class="msg-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
-                <span class="msg-tok" :class="{ hot: (item.msg.tokens || 0) > 2000 }">{{ fmtTokens(item.msg.tokens || 0) }}</span>
+                <span class="msg-tok" :class="{ hot: (item.msg.tokens || 0) > 2000, oversized: isOversizedResult(item.msg) }" v-tooltip="isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens — re-sent every turn' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
               </div>
             </div>
           </div>
@@ -984,7 +988,7 @@ watch(
                   <span class="chrono-cat-dot" :style="{ background: chronoCategoryColor(item.msg) }" />
                   <span class="chrono-type">{{ chronoCategoryLabel(item.msg) }}</span>
                   <span class="chrono-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
-                  <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000 }">{{ fmtTokens(item.msg.tokens || 0) }}</span>
+                  <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000, oversized: !item.future && isOversizedResult(item.msg) }" v-tooltip="!item.future && isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens — re-sent every turn, crowding conversation history' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
                 </div>
               </template>
             </div>
@@ -1275,7 +1279,8 @@ watch(
   flex-shrink: 0;
   pointer-events: none;
 
-  &.hot { color: var(--accent-amber); }
+  &.hot      { color: var(--accent-amber); }
+  &.oversized { color: var(--accent-red); font-weight: 600; }
 }
 
 // ── Chronological view ──
@@ -1362,7 +1367,8 @@ watch(
   flex-shrink: 0;
   pointer-events: none;
 
-  &.hot { color: var(--accent-amber); }
+  &.hot      { color: var(--accent-amber); }
+  &.oversized { color: var(--accent-red); font-weight: 600; }
 }
 
 // ── Turn boundary markers ──

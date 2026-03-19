@@ -4,14 +4,16 @@ import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
 import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, getCategoryLabel, getCategoryColor } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
-import { calculateContextDiff, projectTurnsRemaining } from '@/utils/timeline'
+import { calculateContextDiff } from '@/utils/timeline'
 import { buildHealthNarrative } from '@/utils/overview'
 import { extractSessionFileAttributions, fileColor, shortFileName, fileDirectory } from '@/utils/files'
+import { computeTurnWaste } from '@/utils/waste'
 import type { ProjectedEntry } from '@/api-types'
 import CompositionTreemap from './CompositionTreemap.vue'
 import ContextDiffPanel from './ContextDiffPanel.vue'
 import HealthFindings from './HealthFindings.vue'
 import ExplainPanel from './ExplainPanel.vue'
+
 
 const explainOpen = ref(false)
 const explainSection = ref<'health' | 'composition' | null>(null)
@@ -25,6 +27,48 @@ const store = useSessionStore()
 
 const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
+
+// Cumulative bloat cost: sum of (oversized_results + thinking_spill) waste
+// across all session entries. Excludes unused tools (harness issue, not session
+// drift) and repeated system prompt (unavoidable fixed overhead).
+const sessionBloatCost = computed((): number | null => {
+  const s = session.value
+  if (!s || s.entries.length === 0) return null
+  let total: number | null = 0
+  for (const e of s.entries) {
+    if (e.httpStatus !== null && (e.httpStatus < 200 || e.httpStatus >= 300)) continue
+    if (e.costUsd === null) { total = null; continue }
+    const comp = e.composition
+    const ctx = e.contextInfo.totalTokens
+    if (ctx === 0) continue
+    // Oversized results: tokens above 8K threshold
+    const resultTok = comp.find((c) => c.category === 'tool_results')?.tokens ?? 0
+    const oversizedFrac = Math.max(0, resultTok - 8_000) / ctx
+    // Thinking spill: tokens above 40% of context
+    const thinkTok = comp.find((c) => c.category === 'thinking')?.tokens ?? 0
+    const thinkFrac = thinkTok / ctx > 0.4 ? (thinkTok - ctx * 0.4) / ctx : 0
+    const bloatFrac = Math.min(1, oversizedFrac + thinkFrac)
+    if (total !== null) total += e.costUsd * bloatFrac
+  }
+  return total !== null ? Math.round(total * 10_000) / 10_000 : null
+})
+const turnWaste = computed(() => {
+  const e = entry.value
+  if (!e) return null
+  // Session-wide called tools for unused tool detection
+  const sessionCalled = new Set<string>()
+  for (const se of (session.value?.entries ?? [])) {
+    for (const m of se.contextInfo.messages ?? []) {
+      if (!m.contentBlocks) continue
+      for (const b of m.contentBlocks) {
+        const block = b as unknown as Record<string, unknown>
+        if (block.type === 'tool_use' && typeof block.name === 'string') sessionCalled.add(block.name)
+      }
+    }
+  }
+  const isFirst = turnNum.value <= 1
+  return computeTurnWaste(e, isFirst, sessionCalled)
+})
 const chronologicalEntries = computed(() => {
   if (!session.value) return []
   return [...session.value.entries].reverse()
@@ -55,9 +99,6 @@ const classified = computed(() => {
   return classifyEntries(chronologicalEntries.value)
 })
 
-const projection = computed(() => {
-  return projectTurnsRemaining(classified.value)
-})
 
 const turnNum = computed(() => {
   const e = entry.value
@@ -273,12 +314,11 @@ function handleTreemapFileClick(filePath: string) {
         </div>
         <div class="stat-label">Context</div>
         <div class="stat-detail">{{ fmtTokens(entry.contextInfo.totalTokens) }} / {{ fmtTokens(entry.contextLimit) }}</div>
-        <div v-if="projection.turnsRemaining !== null && projection.turnsRemaining > 0" class="stat-projection" v-tooltip="`Growing ~${fmtTokens(Math.round(projection.growthPerTurn))}/turn over ${projection.sinceCompaction} turns`">
-          ~{{ projection.turnsRemaining }} turns left
-        </div>
-        <div v-else-if="projection.turnsRemaining === 0" class="stat-projection stat-projection--warn" v-tooltip="'Context window is at or near the limit'">
-          At limit
-        </div>
+        <div v-if="turnWaste && turnWaste.wasteRatio > 0.05"
+          class="stat-projection"
+          :class="{ 'stat-projection--warn': turnWaste.wasteRatio >= 0.5 }"
+          v-tooltip="'Structural overhead this turn: ' + turnWaste.categories.map(c => `${c.label} ${Math.round(c.pct * 100)}%`).join(', ')"
+        >{{ Math.round(turnWaste.wasteRatio * 100) }}% overhead</div>
         <!-- Composition tape -->
         <div v-if="compositionTape" class="stat-tape">
           <div
@@ -298,6 +338,11 @@ function handleTreemapFileClick(filePath: string) {
         <div class="stat-readout green">{{ fmtCost(entry.costUsd) }}</div>
         <div class="stat-label">Turn cost</div>
         <div class="stat-detail">{{ fmtCost(session?.entries.reduce((s, e) => s + (e.costUsd ?? 0), 0) ?? 0) }} session</div>
+        <div
+          v-if="sessionBloatCost !== null && sessionBloatCost > 0.001"
+          class="stat-detail stat-detail--bloat"
+          v-tooltip="'Estimated cost of oversized tool results and excess thinking across all turns — tokens re-billed every turn without adding new information'"
+        >~{{ fmtCost(sessionBloatCost) }} bloat</div>
       </div>
 
       <!-- Output -->
@@ -363,6 +408,40 @@ function handleTreemapFileClick(filePath: string) {
       :audit-tooltip="auditTooltip"
       @recommendation-click="handleRecClick"
     />
+
+    <!-- ═══ Structural Overhead (this turn) ═══ -->
+    <section class="panel panel--overhead" v-if="turnWaste && turnWaste.wasteTokens > 0">
+      <div class="panel-head">
+        <span class="panel-title">Structural Overhead</span>
+        <span class="overhead-ratio" :class="turnWaste.wasteRatio >= 0.5 ? 'rate-high' : turnWaste.wasteRatio >= 0.3 ? 'rate-med' : 'rate-low'">
+          {{ Math.round(turnWaste.wasteRatio * 100) }}% this turn
+        </span>
+      </div>
+      <div class="overhead-bar-wrap">
+        <div class="overhead-bar">
+          <div v-for="cat in turnWaste.categories" :key="cat.id"
+            class="overhead-seg"
+            :style="{ width: `${Math.round(cat.pct * 100)}%`, background: cat.color }"
+            :title="`${cat.label}: ${fmtTokens(cat.tokens)}`"
+          />
+          <div class="overhead-seg overhead-seg--useful"
+            :style="{ width: `${Math.max(0, 100 - Math.round(turnWaste.wasteRatio * 100))}%` }"
+            title="Useful context"
+          />
+        </div>
+      </div>
+      <div class="overhead-cats">
+        <div v-for="cat in turnWaste.categories" :key="cat.id" class="overhead-cat">
+          <span class="overhead-dot" :style="{ background: cat.color }" />
+          <span class="overhead-name">{{ cat.label }}</span>
+          <span class="overhead-tok">{{ fmtTokens(cat.tokens) }}</span>
+          <span class="overhead-pct">{{ Math.round(cat.pct * 100) }}%</span>
+        </div>
+        <div v-if="turnWaste.unusedToolNames.length" class="overhead-unused">
+          Unused: {{ turnWaste.unusedToolNames.slice(0, 4).join(', ') }}{{ turnWaste.unusedToolNames.length > 4 ? ` +${turnWaste.unusedToolNames.length - 4}` : '' }}
+        </div>
+      </div>
+    </section>
 
     <!-- ═══ Context Diff ═══ -->
     <ContextDiffPanel
@@ -595,6 +674,12 @@ function handleTreemapFileClick(filePath: string) {
   font-size: var(--text-xs);
   color: var(--text-ghost);
   margin-top: 2px;
+
+  &--bloat {
+    color: var(--accent-red);
+    opacity: 0.7;
+    cursor: default;
+  }
 }
 
 .stat-projection {
@@ -873,5 +958,101 @@ function handleTreemapFileClick(filePath: string) {
   height: 100%;
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+// ── Structural overhead panel ──
+.panel--overhead {
+  position: relative;
+  border-left: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent-amber);
+    pointer-events: none;
+  }
+}
+
+.overhead-ratio {
+  @include mono-text;
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+
+  &.rate-low  { background: rgba(16, 185, 129, 0.1); color: #6ee7b7; }
+  &.rate-med  { background: rgba(245, 158, 11, 0.1);  color: #fbbf24; }
+  &.rate-high { background: rgba(239, 68, 68, 0.08);  color: #fca5a5; }
+}
+
+.overhead-bar-wrap {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.overhead-bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  display: flex;
+  gap: 1px;
+}
+
+.overhead-seg {
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  min-width: 2px;
+
+  &--useful { background: var(--border-mid); }
+}
+
+.overhead-cats {
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.overhead-cat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.overhead-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.overhead-name {
+  @include sans-text;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.overhead-tok {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.overhead-pct {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-ghost);
+  width: 28px;
+  text-align: right;
+}
+
+.overhead-unused {
+  @include sans-text;
+  font-size: var(--text-xs);
+  color: var(--text-ghost);
+  margin-top: var(--space-1);
 }
 </style>
