@@ -8,7 +8,7 @@ See what's actually filling your context window. Context Lens is a local proxy t
 
 Works with Claude Code, Codex, Gemini CLI, Cline, Aider, Pi, and anything else that talks to OpenAI/Anthropic/Google APIs. No code changes needed.
 
-**Using AI coding tools across a team?** Token costs compound fast when every developer runs agents all day. Context Lens gives you per-session visibility into where the budget goes — which tools, which patterns, which sessions are outliers. Export sessions as [LHAR](docs/LHAR.md) to share and compare. Team dashboards are on the roadmap; if that's relevant for you, [open an issue](https://github.com/larsderidder/context-lens/issues) or watch this repo.
+**Using AI coding tools across a team?** Token costs compound fast when every developer runs agents all day. Context Lens gives you per-session visibility into where the budget goes: which tools, which patterns, which sessions are outliers. Export sessions as [LHAR](docs/LHAR.md) to share and compare. Team dashboards are on the roadmap; if that's relevant for you, [open an issue](https://github.com/larsderidder/context-lens/issues) or watch this repo.
 
 ![Context Lens UI](screenshot-overview.png)
 
@@ -175,18 +175,18 @@ services:
 
 ## What You Get
 
-- **Composition treemap:** visual breakdown of what's filling your context (system prompts, tool definitions, tool results, messages, thinking, images)
-- **Cost tracking:** per-turn and per-session cost estimates across models
-- **Conversation threading:** groups API calls by session, shows main agent vs subagent turns
-- **Agent breakdown:** token usage and cost per agent within a session
-- **Timeline:** bar chart of context size over time, filterable by main/all/cost
-- **Context diff:** turn-to-turn delta showing what grew, shrank, or appeared
-- **Findings:** flags large tool results, unused tool definitions, context overflow risk, compaction events
-- **Auto-detection:** recognizes Claude Code, Codex, aider, Pi, and others by source tag or system prompt
-- **Session tagging:** label sessions with custom tags, filter the session list by tag
-- **LHAR export:** download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
-- **State persistence:** data survives restarts; delete individual sessions or reset all from the UI
-- **Streaming support:** passes through SSE chunks in real-time
+- Composition treemap: visual breakdown of what's filling your context (system prompts, tool definitions, tool results, messages, thinking, images)
+- Cost tracking: per-turn and per-session cost estimates across models
+- Conversation threading: groups API calls by session, shows main agent vs subagent turns
+- Agent breakdown: token usage and cost per agent within a session
+- Timeline: bar chart of context size over time, filterable by main/all/cost
+- Context diff: turn-to-turn delta showing what grew, shrank, or appeared
+- Findings: flags large tool results, unused tool definitions, context overflow risk, compaction events
+- Auto-detection: recognizes Claude Code, Codex, aider, Pi, and others by source tag or system prompt
+- Session tagging: label sessions with custom tags, filter the session list by tag
+- LHAR export: download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
+- State persistence: data survives restarts; delete individual sessions or reset all from the UI
+- Streaming support: passes through SSE chunks in real-time
 
 ### Screenshots
 
@@ -262,7 +262,7 @@ redact = "secrets"
 
 ### OpenCode
 
-OpenCode connects to multiple providers simultaneously over HTTPS. Use `context-lens opencode` — it routes all traffic through mitmproxy so every provider call is captured regardless of which model is active:
+OpenCode connects to multiple providers simultaneously over HTTPS. Use `context-lens opencode`; it routes all traffic through mitmproxy so every provider call is captured regardless of which model is active:
 
 ```bash
 pipx install mitmproxy
@@ -284,7 +284,7 @@ pipx install mitmproxy
 context-lens cline
 ```
 
-Cline is a Node.js process, so it uses `NODE_EXTRA_CA_CERTS` (not `SSL_CERT_FILE`) to trust the mitmproxy CA certificate. The CLI handles this automatically.
+Cline is a Node.js process, so it uses `NODE_EXTRA_CA_CERTS` (not `SSL_CERT_FILE`) to trust the mitmproxy CA certificate; the CLI handles this automatically.
 
 ### OpenAI-Compatible Endpoints
 
@@ -298,7 +298,7 @@ UPSTREAM_OPENAI_URL=https://my-provider.com/v1 context-lens -- my-tool "prompt"
 
 ### Codex Subscription Mode
 
-Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudflare blocks reverse proxies). The CLI handles this automatically. Just make sure `mitmdump` is installed:
+Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudflare blocks reverse proxies); the CLI handles this automatically. Just make sure `mitmdump` is installed:
 
 ```bash
 pipx install mitmproxy
@@ -340,11 +340,11 @@ The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the too
 
 Tools like [Langfuse](https://langfuse.com/) and [Braintrust](https://braintrust.dev/) are great for observability when you control the code: you add their SDK, instrument your calls, and get traces in a dashboard. Context Lens solves a different problem.
 
-**You can't instrument tools you don't own.** Claude Code, Codex, Gemini CLI, and Aider are closed-source binaries. You can't add an SDK to them. Context Lens works as a transparent proxy, so it captures everything without touching the tool's code.
+Claude Code, Codex, Gemini CLI, and Aider are closed-source binaries; you can't add an SDK to them. Context Lens works as a transparent proxy, capturing everything without touching the tool's code.
 
-**Context composition, not just token counts.** Most observability tools show you input/output token totals. Context Lens breaks down *what's inside* the context window: how much is system prompts vs. tool definitions vs. conversation history vs. tool results vs. thinking blocks. That's what you need to understand why sessions get expensive.
+Most observability tools show input/output token totals. Context Lens breaks down *what's inside* the context window: how much is system prompts, tool definitions, conversation history, tool results, thinking blocks. That breakdown is what you need to understand why sessions get expensive.
 
-**Local and private.** Everything runs on your machine. No accounts, no cloud, no data leaving your network. Start it, use it, stop it.
+Everything runs on your machine. No accounts, no cloud, no data leaving your network.
 
 | | Context Lens | Langfuse / Braintrust |
 |:---|:---|:---|
