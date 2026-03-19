@@ -187,7 +187,9 @@ export function computeWasteAnalysis(entries: ProjectedEntry[]): WasteAnalysis {
   let totalInputCostUsd: number | null = 0
   const model = good[0].contextInfo.model
   for (const e of good) {
-    totalInputTokens += e.usage?.inputTokens ?? e.contextInfo.totalTokens
+    // Use full context size (not just non-cached input tokens) so the denominator
+    // matches the composition numbers used in waste category calculations.
+    totalInputTokens += e.contextInfo.totalTokens
     if (e.costUsd !== null && totalInputCostUsd !== null) totalInputCostUsd += e.costUsd
     else if (e.costUsd === null) totalInputCostUsd = null
   }

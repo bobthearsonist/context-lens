@@ -310,8 +310,10 @@ export function computeWasteAnalysis(entries: ProjectedEntry[]): WasteAnalysis {
   let totalInputTokens = 0;
   let totalInputCostUsd: number | null = 0;
   for (const e of good) {
-    const input = e.usage?.inputTokens ?? e.contextInfo.totalTokens;
-    totalInputTokens += input;
+    // Use full context size so the denominator matches composition-based waste
+    // calculations. usage.inputTokens is the non-cached portion only and would
+    // produce a wildly inflated waste ratio for cache-heavy sessions.
+    totalInputTokens += e.contextInfo.totalTokens;
     if (e.costUsd !== null) {
       if (totalInputCostUsd !== null) totalInputCostUsd += e.costUsd;
     } else {
