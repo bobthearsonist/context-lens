@@ -27,6 +27,31 @@ const store = useSessionStore()
 
 const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
+
+// Cumulative bloat cost: sum of (oversized_results + thinking_spill) waste
+// across all session entries. Excludes unused tools (harness issue, not session
+// drift) and repeated system prompt (unavoidable fixed overhead).
+const sessionBloatCost = computed((): number | null => {
+  const s = session.value
+  if (!s || s.entries.length === 0) return null
+  let total: number | null = 0
+  for (const e of s.entries) {
+    if (e.httpStatus !== null && (e.httpStatus < 200 || e.httpStatus >= 300)) continue
+    if (e.costUsd === null) { total = null; continue }
+    const comp = e.composition
+    const ctx = e.contextInfo.totalTokens
+    if (ctx === 0) continue
+    // Oversized results: tokens above 8K threshold
+    const resultTok = comp.find((c) => c.category === 'tool_results')?.tokens ?? 0
+    const oversizedFrac = Math.max(0, resultTok - 8_000) / ctx
+    // Thinking spill: tokens above 40% of context
+    const thinkTok = comp.find((c) => c.category === 'thinking')?.tokens ?? 0
+    const thinkFrac = thinkTok / ctx > 0.4 ? (thinkTok - ctx * 0.4) / ctx : 0
+    const bloatFrac = Math.min(1, oversizedFrac + thinkFrac)
+    if (total !== null) total += e.costUsd * bloatFrac
+  }
+  return total !== null ? Math.round(total * 10_000) / 10_000 : null
+})
 const turnWaste = computed(() => {
   const e = entry.value
   if (!e) return null
@@ -317,6 +342,11 @@ function handleTreemapFileClick(filePath: string) {
         <div class="stat-readout green">{{ fmtCost(entry.costUsd) }}</div>
         <div class="stat-label">Turn cost</div>
         <div class="stat-detail">{{ fmtCost(session?.entries.reduce((s, e) => s + (e.costUsd ?? 0), 0) ?? 0) }} session</div>
+        <div
+          v-if="sessionBloatCost !== null && sessionBloatCost > 0.001"
+          class="stat-detail stat-detail--bloat"
+          v-tooltip="'Estimated cost of oversized tool results and excess thinking across all turns — tokens re-billed every turn without adding new information'"
+        >~{{ fmtCost(sessionBloatCost) }} bloat</div>
       </div>
 
       <!-- Output -->
@@ -648,6 +678,12 @@ function handleTreemapFileClick(filePath: string) {
   font-size: var(--text-xs);
   color: var(--text-ghost);
   margin-top: 2px;
+
+  &--bloat {
+    color: var(--accent-red);
+    opacity: 0.7;
+    cursor: default;
+  }
 }
 
 .stat-projection {

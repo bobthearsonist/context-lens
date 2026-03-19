@@ -25,7 +25,7 @@ import {
   cacheHitRate,
   projectTurnsRemaining,
 } from '@/utils/timeline'
-import { computeWasteTimeline } from '@/utils/waste'
+
 
 const store = useSessionStore()
 
@@ -35,7 +35,7 @@ const stackMode = computed({ get: () => store.timelineStackMode, set: (v) => { s
 const hiddenLegendKeys = computed({ get: () => store.timelineHiddenLegendKeys, set: (v) => { store.timelineHiddenLegendKeys = v } })
 const showLimitOverlay = computed({ get: () => store.timelineShowLimitOverlay, set: (v) => { store.timelineShowLimitOverlay = v } })
 const showCacheOverlay = computed({ get: () => store.timelineShowCacheOverlay, set: (v) => { store.timelineShowCacheOverlay = v } })
-const showWasteOverlay = ref(false)
+
 const tokenChartScrollEl = ref<HTMLElement | null>(null)
 const costChartScrollEl = ref<HTMLElement | null>(null)
 
@@ -259,34 +259,6 @@ const cacheLinePoints = computed((): string => {
   return points.join(' ')
 })
 
-// ── Waste overlay (per-turn waste ratio polyline) ──
-
-const wasteLinePoints = computed((): string => {
-  const items = filtered.value
-  const last = lastMainSlotIndex.value
-  if (items.length === 0 || last < 0) return ''
-
-  // Collect main entries in order
-  const mainEntries = items
-    .slice(0, last + 1)
-    .filter((item) => mode.value !== 'all' || item.isMain)
-    .map((item) => item.entry)
-
-  const ratios = computeWasteTimeline(mainEntries)
-  if (ratios.length === 0) return ''
-
-  const points: string[] = []
-  let mainIdx = 0
-  for (let i = 0; i <= last; i++) {
-    if (mode.value === 'all' && !items[i].isMain) continue
-    const x = i + 0.5
-    const y = (1 - (ratios[mainIdx] ?? 0)) * 100
-    points.push(`${x.toFixed(3)},${y.toFixed(2)}`)
-    mainIdx++
-  }
-  return points.join(' ')
-})
-
 // ── Turns remaining projection ──
 
 const projection = computed(() => {
@@ -348,10 +320,7 @@ watch(
             <span class="legend-dot legend-dot--cache" />
             Cache
           </button>
-          <button class="overlay-toggle" :class="{ on: showWasteOverlay }" @click="showWasteOverlay = !showWasteOverlay" v-tooltip="'Structural overhead % per turn'">
-            <span class="legend-dot legend-dot--waste" />
-            Waste
-          </button>
+
           <button v-if="stackMode === 'absolute'" class="overlay-toggle" :class="{ on: showLimitOverlay }" @click="showLimitOverlay = !showLimitOverlay">
             <span class="legend-dot legend-dot--dashed" />
             Limit
@@ -423,26 +392,7 @@ watch(
                   opacity="0.7"
                 />
               </svg>
-              <!-- Waste % line overlay -->
-              <svg
-                v-if="showWasteOverlay && wasteLinePoints"
-                class="cache-line-svg waste-line-svg"
-                :viewBox="cacheViewBox"
-                :style="{ width: cacheOverlayWidthPct }"
-                preserveAspectRatio="none"
-              >
-                <polyline
-                  :points="wasteLinePoints"
-                  fill="none"
-                  stroke="var(--accent-amber)"
-                  stroke-width="1.5"
-                  vector-effect="non-scaling-stroke"
-                  stroke-linejoin="round"
-                  stroke-linecap="round"
-                  stroke-dasharray="4 2"
-                  opacity="0.8"
-                />
-              </svg>
+
 
             </div>
 
@@ -916,14 +866,7 @@ watch(
   opacity: 0.7;
 }
 
-.legend-dot--waste {
-  width: 10px;
-  height: 2px;
-  border-radius: 0;
-  background: none;
-  border-top: 2px dashed var(--accent-amber);
-  opacity: 0.8;
-}
+
 
 // ── Cache hit rate line overlay ──
 .cache-line-svg {
