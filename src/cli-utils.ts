@@ -88,6 +88,19 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     serverEnv: {},
     needsMitm: true,
   },
+  copilot: {
+    // GitHub Copilot CLI (@github/copilot) supports COPILOT_API_URL to
+    // redirect all API traffic to a custom endpoint. We point it at the
+    // reverse proxy so captures work without mitmproxy.
+    //
+    // The proxy needs to forward openai-classified traffic to
+    // api.githubcopilot.com instead of api.openai.com, so we override
+    // UPSTREAM_OPENAI_URL in the server (proxy) environment.
+    childEnv: { COPILOT_API_URL: `${PROXY_URL}/copilot` },
+    extraArgs: [],
+    serverEnv: { UPSTREAM_OPENAI_URL: "https://api.githubcopilot.com" },
+    needsMitm: false,
+  },
   aider: {
     childEnv: {
       ANTHROPIC_BASE_URL: `${PROXY_URL}/aider`,
@@ -335,6 +348,7 @@ export function formatHelpText(): string {
     "  context-lens claude",
     "  context-lens codex",
     "  context-lens cline",
+    "  context-lens copilot",
     "  context-lens opencode",
     "  context-lens gm",
     "  context-lens bryti",
@@ -376,6 +390,7 @@ export function formatHelpText(): string {
     "  - No command starts standalone mode (proxy + analysis/web UI by default).",
     "  - 'codex', 'cline', and 'opencode' use mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
     "  - 'cline' with Anthropic OAuth routes through api.cline.bot; mitmproxy intercepts that traffic.",
+    "  - 'copilot' (GitHub Copilot CLI, @github/copilot) uses COPILOT_API_URL to redirect traffic through the proxy; no mitmproxy needed.",
     "  - 'pi --mitm' uses mitmproxy for full interception, useful for subscription-based models (openai-codex provider).",
     "  - 'doctor' is a local diagnostics command.",
     "  - 'background' manages detached proxy/web-ui processes.",

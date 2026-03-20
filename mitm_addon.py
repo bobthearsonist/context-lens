@@ -41,6 +41,7 @@ CAPTURE_PATTERNS = [
     # Cline OAuth (routes through api.cline.bot, not directly to Anthropic)
     # Uses Anthropic message format with OpenRouter-style model IDs.
     ("api.cline.bot", "/v1/messages", "anthropic", "cline"),
+
     # OpenAI API — source left as None so detectSource can identify the tool
     # from headers/system prompts (opencode, aider, etc.)
     ("api.openai.com", "/v1/responses", "openai", None),

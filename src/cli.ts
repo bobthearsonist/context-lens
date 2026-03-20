@@ -582,9 +582,15 @@ if (parsedArgs.commandName === "analyze") {
                   console.error(
                     "\n⚠️  No API traffic captured yet. If the tool is running, it may not be routing through the proxy.",
                   );
-                  console.error(
-                    `   Check that ${commandName} is using the proxy URL (http://localhost:4040).\n`,
-                  );
+                  if (toolConfig.needsMitm) {
+                    console.error(
+                      `   Check that ${commandName} is routing through mitmproxy (https_proxy=http://localhost:8080).\n`,
+                    );
+                  } else {
+                    console.error(
+                      `   Check that ${commandName} is using the proxy URL (http://localhost:4040).\n`,
+                    );
+                  }
                 }
               } catch {}
             });
