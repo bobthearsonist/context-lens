@@ -140,7 +140,9 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
       PI_CODING_AGENT_DIR: PI_AGENT_DIR_PREFIX,
     },
     extraArgs: [],
-    serverEnv: {},
+    // Allow x-target-url header so providers with non-standard upstreams
+    // (e.g. opencode, kilo) can tell the proxy their real destination URL.
+    serverEnv: { CONTEXT_PROXY_ALLOW_TARGET_OVERRIDE: "1" },
     needsMitm: false,
   },
   bryti: {

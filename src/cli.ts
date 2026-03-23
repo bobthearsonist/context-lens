@@ -721,21 +721,55 @@ if (parsedArgs.commandName === "analyze") {
           : {};
 
       const proxyBaseUrl = `${CLI_CONSTANTS.PROXY_URL}/pi`;
-      for (const key of [
-        "anthropic",
-        "openai",
-        "openai-codex",
-        "google-gemini-cli",
-        "google-antigravity",
-      ]) {
-        const existing = providers[key];
-        providers[key] =
-          existing && typeof existing === "object" && !Array.isArray(existing)
+
+      // These upstreams are natively understood by the proxy — no target
+      // override needed, the proxy routes them correctly by path/format.
+      const nativeUpstreams = new Set([
+        "https://api.anthropic.com",
+        "https://api.openai.com",
+        "https://generativelanguage.googleapis.com",
+        "https://cloudcode-pa.googleapis.com",
+        "https://us-central1-aiplatform.googleapis.com",
+      ]);
+
+      // Rewrite every provider that has an external baseUrl, regardless of its
+      // key name. For providers whose upstream isn't natively known to the proxy,
+      // stash the real URL as x-target-url so the proxy forwards correctly.
+      for (const [key, value] of Object.entries(providers)) {
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          continue;
+        const provider = value as Record<string, unknown>;
+        const originalBaseUrl =
+          typeof provider.baseUrl === "string" ? provider.baseUrl : null;
+
+        // Skip providers with no baseUrl or a local/relative URL
+        if (!originalBaseUrl || !originalBaseUrl.startsWith("http")) continue;
+        // Skip providers already pointing at the proxy
+        if (originalBaseUrl.startsWith("http://localhost")) continue;
+
+        const needsTargetOverride = !nativeUpstreams.has(
+          originalBaseUrl.replace(/\/$/, ""),
+        );
+
+        const existingHeaders =
+          provider.headers &&
+          typeof provider.headers === "object" &&
+          !Array.isArray(provider.headers)
+            ? (provider.headers as Record<string, string>)
+            : {};
+
+        providers[key] = {
+          ...provider,
+          baseUrl: proxyBaseUrl,
+          ...(needsTargetOverride
             ? {
-                ...(existing as Record<string, unknown>),
-                baseUrl: proxyBaseUrl,
+                headers: {
+                  ...existingHeaders,
+                  "x-target-url": originalBaseUrl,
+                },
               }
-            : { baseUrl: proxyBaseUrl };
+            : {}),
+        };
       }
 
       fs.writeFileSync(
