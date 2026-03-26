@@ -98,7 +98,7 @@ if (parsedArgs.commandName === "analyze") {
     const analysisPath = join(__dirname, "analysis", "server.js");
     const proxy = spawn("node", [proxyPath], {
       stdio: "inherit",
-      env: { ...process.env },
+      env: { ...process.env, CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041" },
     });
     const analysis = spawn("node", [analysisPath], {
       stdio: "inherit",
@@ -273,6 +273,7 @@ if (parsedArgs.commandName === "analyze") {
       ...toolConfig.serverEnv,
       ...process.env,
       CONTEXT_LENS_CLI: "1",
+      CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041",
     };
 
     // Start proxy
@@ -465,8 +466,8 @@ if (parsedArgs.commandName === "analyze") {
     // Codex uses mitmproxy and has its own chaining via previous_response_id.
     // Claude Code and Pi embed their own session IDs in request metadata.
     // Tools without built-in session IDs (Gemini, Aider, custom) rely on this.
+    const sessionTag = randomBytes(4).toString("hex"); // 8 hex chars
     if (!toolConfig.needsMitm) {
-      const sessionTag = randomBytes(4).toString("hex"); // 8 hex chars
       // For bryti, the proxy URL is baked into config.yml (not an env var),
       // so the session tag loop below won't reach it. Pass it to prepareBrytiDataDir
       // so it can embed the tag directly into the patched config.yml base_url.
@@ -517,6 +518,7 @@ if (parsedArgs.commandName === "analyze") {
     if (commandName === "pi" && !useMitm) {
       childEnv.PI_CODING_AGENT_DIR = preparePiAgentDir(
         childEnv.PI_CODING_AGENT_DIR,
+        sessionTag,
       );
     }
 
@@ -662,7 +664,7 @@ if (parsedArgs.commandName === "analyze") {
     return resolve(baseDir, pkg);
   }
 
-  function preparePiAgentDir(targetDirEnv: string | undefined): string {
+  function preparePiAgentDir(targetDirEnv: string | undefined, sessionTag?: string): string {
     const dirPrefix =
       targetDirEnv && targetDirEnv.length > 0
         ? targetDirEnv
@@ -720,7 +722,9 @@ if (parsedArgs.commandName === "analyze") {
           ? { ...(modelsConfig.providers as Record<string, unknown>) }
           : {};
 
-      const proxyBaseUrl = `${CLI_CONSTANTS.PROXY_URL}/pi`;
+      const proxyBaseUrl = sessionTag
+        ? `${CLI_CONSTANTS.PROXY_URL}/pi/${sessionTag}`
+        : `${CLI_CONSTANTS.PROXY_URL}/pi`;
 
       // These upstreams are natively understood by the proxy — no target
       // override needed, the proxy routes them correctly by path/format.
@@ -770,6 +774,19 @@ if (parsedArgs.commandName === "analyze") {
               }
             : {}),
         };
+      }
+
+      // The old code explicitly wrote "anthropic" unconditionally; the rewrite
+      // in 83225d2 switched to iterating existing providers, which dropped this.
+      // Pi uses the built-in anthropic provider by default and it may not appear
+      // in models.json at all, so we must always inject it.
+      if (!providers.anthropic) {
+        providers.anthropic = { baseUrl: proxyBaseUrl, api: "anthropic-messages" };
+      } else {
+        const ap = providers.anthropic as Record<string, unknown>;
+        if (!String(ap.baseUrl ?? "").startsWith("http://localhost")) {
+          providers.anthropic = { ...ap, baseUrl: proxyBaseUrl };
+        }
       }
 
       fs.writeFileSync(
@@ -1189,10 +1206,15 @@ async function backgroundStart(noUi: boolean): Promise<number> {
   if (existing) clearBackgroundState();
 
   const proxyPath = join(__dirname, "proxy", "server.js");
+  const proxyEnv: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    CONTEXT_LENS_CLI: "1",
+    ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041" }),
+  };
   const proxy = spawn("node", [proxyPath], {
     stdio: "ignore",
     detached: true,
-    env: { ...process.env, CONTEXT_LENS_CLI: "1" },
+    env: proxyEnv,
   });
   proxy.unref();
 
