@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
-import { getExportUrl } from '@/api'
+import { getExportUrl, uploadToContextlensIo } from '@/api'
 import TagEditor from '@/components/TagEditor.vue'
 
 const showTagEditor = ref(false)
@@ -35,6 +35,22 @@ const store = useSessionStore()
 const showExportMenu = ref(false)
 const showResetMenu = ref(false)
 const sessionIdCopied = ref(false)
+const uploading = ref(false)
+const uploadError = ref<string | null>(null)
+
+// Shared mode: expiry countdown
+const now = ref(Date.now())
+let _nowTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => { _nowTimer = setInterval(() => { now.value = Date.now() }, 60_000) })
+onBeforeUnmount(() => { if (_nowTimer) clearInterval(_nowTimer) })
+
+const sharedExpiryDays = computed(() => {
+  if (!store.isSharedMode || !store.summaries.length) return null
+  const firstSeen = new Date(store.summaries[0].firstSeen).getTime()
+  const expiresAt = firstSeen + 7 * 24 * 60 * 60 * 1000
+  const msLeft = expiresAt - now.value
+  return Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000)))
+})
 
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
@@ -106,6 +122,27 @@ async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'sessio
     window.open(url, '_blank')
   }
   showExportMenu.value = false
+}
+
+async function handleUpload(scope: 'all' | 'session') {
+  uploading.value = true
+  uploadError.value = null
+  showExportMenu.value = false
+  const convoId = scope === 'session' ? store.selectedSessionId ?? undefined : undefined
+  try {
+    const result = await uploadToContextlensIo(convoId)
+    const msg = result.stats.total > 0
+      ? `${result.summary}\n\nShare URL copied to clipboard:\n${result.url}`
+      : `No sensitive data found.\n\nShare URL copied to clipboard:\n${result.url}`
+    await navigator.clipboard.writeText(result.url).catch(() => {})
+    alert(msg)
+    window.open(result.url, '_blank')
+  } catch (err) {
+    uploadError.value = (err as Error).message
+    alert(`Upload failed: ${(err as Error).message}`)
+  } finally {
+    uploading.value = false
+  }
 }
 
 function toggleExportMenu() {
@@ -268,7 +305,11 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 
     <!-- ═══ Right: global controls ═══ -->
     <div class="toolbar-right">
-      <span class="connection" :class="{ live: store.connected }">
+      <span v-if="store.isSharedMode" class="connection shared" :class="{ expiring: sharedExpiryDays !== null && sharedExpiryDays <= 1 }">
+        <i class="i-carbon-share" />
+        Shared{{ sharedExpiryDays !== null ? ` · ${sharedExpiryDays}d left` : '' }}
+      </span>
+      <span v-else class="connection" :class="{ live: store.connected }">
         <span class="connection-dot" />
         {{ store.connected ? 'Live' : 'Offline' }}
       </span>
@@ -301,11 +342,20 @@ function onSessionIdKeydown(e: KeyboardEvent) {
               <button class="dropdown-item" @click="handleExport('lhar.json', 'session')"><i class="i-carbon-document" /> Session (.lhar.json)</button>
               <button class="dropdown-item" @click="handleExport('lhar', 'session')"><i class="i-carbon-document" /> Session (.lhar)</button>
             </template>
+            <div class="dropdown-sep" />
+            <button class="dropdown-item dropdown-item--upload" :disabled="uploading" @click="handleUpload('all')">
+              <i class="i-carbon-upload" /> {{ uploading ? 'Uploading…' : 'Share all (contextlens.io)' }}
+            </button>
+            <template v-if="store.selectedSessionId">
+              <button class="dropdown-item dropdown-item--upload" :disabled="uploading" @click="handleUpload('session')">
+                <i class="i-carbon-upload" /> {{ uploading ? 'Uploading…' : 'Share session (contextlens.io)' }}
+              </button>
+            </template>
           </div>
         </Transition>
       </div>
 
-      <div v-if="hasRequests" class="toolbar-dropdown">
+      <div v-if="hasRequests && !store.isSharedMode" class="toolbar-dropdown">
         <button class="toolbar-control" @click="toggleResetMenu">
           <i class="i-carbon-overflow-menu-horizontal" /> Menu
         </button>
@@ -597,6 +647,12 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   color: var(--text-muted);
 
   &.live { color: var(--text-dim); }
+
+  &.shared {
+    color: var(--accent-blue);
+    i { font-size: 10px; }
+    &.expiring { color: var(--accent-yellow, #f59e0b); }
+  }
 }
 
 .connection-dot {
@@ -702,6 +758,21 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 .dropdown-item--danger {
   &:hover {
     color: var(--accent-red);
+  }
+}
+
+.dropdown-item--upload {
+  &:hover {
+    color: var(--accent-blue);
+  }
+
+  &:disabled {
+    color: var(--text-ghost);
+    cursor: default;
+
+    i { color: var(--text-ghost); }
+
+    &:hover { background: none; color: var(--text-ghost); }
   }
 }
 
