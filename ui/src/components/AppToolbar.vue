@@ -154,11 +154,11 @@ async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'sessio
   showExportMenu.value = false
 }
 
-async function handleUpload(scope: 'all' | 'session') {
+async function handleUpload() {
   uploading.value = true
   uploadError.value = null
   showExportMenu.value = false
-  const convoId = scope === 'session' ? store.selectedSessionId ?? undefined : undefined
+  const convoId = store.selectedSessionId ?? undefined
   try {
     const result = await uploadToContextlensIo(convoId)
     const msg = result.stats.total > 0
@@ -363,7 +363,11 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         <i class="i-carbon-paste" /> Paste
       </button>
 
-      <div v-if="hasRequests" class="toolbar-dropdown">
+      <div v-if="uploading" class="toolbar-uploading">
+        <i class="i-carbon-circle-dash toolbar-spinner" /> Uploading…
+      </div>
+
+      <div v-if="hasRequests && !uploading" class="toolbar-dropdown">
         <button class="toolbar-control" @click="toggleExportMenu">
           <i class="i-carbon-download" /> Export
         </button>
@@ -376,14 +380,12 @@ function onSessionIdKeydown(e: KeyboardEvent) {
               <button class="dropdown-item" @click="handleExport('lhar.json', 'session')"><i class="i-carbon-document" /> Session (.lhar.json)</button>
               <button class="dropdown-item" @click="handleExport('lhar', 'session')"><i class="i-carbon-document" /> Session (.lhar)</button>
             </template>
-            <div class="dropdown-sep" />
-            <button class="dropdown-item dropdown-item--upload" :disabled="uploading" @click="handleUpload('all')">
-              <i class="i-carbon-upload" /> {{ uploading ? 'Uploading…' : 'Share all (contextlens.io)' }}
-            </button>
             <template v-if="store.selectedSessionId">
-              <button class="dropdown-item dropdown-item--upload" :disabled="uploading" @click="handleUpload('session')">
-                <i class="i-carbon-upload" /> {{ uploading ? 'Uploading…' : 'Share session (contextlens.io)' }}
+              <div class="dropdown-sep" />
+              <button class="dropdown-item dropdown-item--upload" :disabled="uploading" @click="handleUpload()">
+                <i class="i-carbon-upload" /> {{ uploading ? 'Uploading…' : 'Share (contextlens.io)' }}
               </button>
+
             </template>
           </div>
         </Transition>
