@@ -1,0 +1,46 @@
+---
+title: "Context Lens Session Linking — Request Timeline"
+---
+sequenceDiagram
+    participant CC as Claude Code<br/>(Main Agent)
+    participant Sub as Claude Code<br/>(Subagent)
+    participant Proxy as CL Proxy
+    participant Store as CL Store
+    participant Adapter as Claude Adapter
+
+    Note over CC,Adapter: Phase 1: Main agent starts a session
+
+    CC->>Proxy: POST /v1/messages<br/>metadata.user_id = "session_AAA"<br/>system: "You are Claude Code"<br/>user: "fix the matching bug"
+    Proxy->>Store: storeRequest()<br/>sessionId = null (no URL tag)<br/>rawBody has session_AAA
+    Store-->>Store: computeFingerprint()<br/>→ SHA256("session_AAA") = conv_111
+    Store-->>Store: Create conversation conv_111<br/>label: "fix the matching bug"
+
+    Note over CC,Adapter: Phase 2: Main agent spawns a subagent
+
+    CC->>Sub: Agent tool: "research the codebase"
+    Sub->>Proxy: POST /v1/messages<br/>metadata.user_id = "session_BBB"<br/>system: "You are a subagent..."<br/>user: "research the codebase"
+    Proxy->>Store: storeRequest()<br/>rawBody has session_BBB
+    Store-->>Store: computeFingerprint()<br/>→ SHA256("session_BBB") = conv_222
+    Store-->>Store: Create conversation conv_222<br/>label: "research the codebase"
+
+    Note over CC,Adapter: ⚠️ GAP: conv_222 is orphaned!<br/>Store doesn't know conv_222<br/>is a child of conv_111
+
+    Note over CC,Adapter: Phase 3: Adapter runs (when?)
+
+    rect rgb(40, 60, 40)
+        Note over Adapter: Option A: Adapter runs async<br/>(watches ~/.claude/projects/)
+        Adapter-->>Adapter: Reads session JSONL file<br/>Finds session_AAA and session_BBB<br/>in same file, with parentUuid links
+        Adapter->>Store: POST /api/relationships<br/>{source: conv_222, target: conv_111,<br/>type: "child", agentName: "researcher"}
+        Store-->>Store: Link conv_222 → conv_111
+    end
+
+    Note over CC,Adapter: ⚠️ GAP: How does the adapter know<br/>conv_111 and conv_222 IDs?<br/>It knows session_AAA and session_BBB<br/>but not the store's conversation IDs!
+
+    Note over CC,Adapter: Phase 4: User resumes session later
+
+    CC->>Proxy: POST /v1/messages<br/>metadata.user_id = "session_CCC"<br/>(same JSONL file, new CLI invocation)
+    Proxy->>Store: storeRequest()<br/>rawBody has session_CCC
+    Store-->>Store: computeFingerprint()<br/>→ SHA256("session_CCC") = conv_333
+    Store-->>Store: Create conversation conv_333
+
+    Note over CC,Adapter: ⚠️ GAP: conv_333 is a continuation<br/>of conv_111 but Store doesn't know

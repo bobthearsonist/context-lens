@@ -1,0 +1,48 @@
+---
+title: "Context Lens Session Linking — Corrected Flow (v2)"
+---
+sequenceDiagram
+    participant CC as Claude Code<br/>(Main Agent)
+    participant Sub as Claude Code<br/>(Subagent)
+    participant Plugin as Proxy Plugin<br/>(Claude Adapter)
+    participant Proxy as CL Proxy
+    participant Store as CL Store
+
+    Note over CC,Store: Startup: Plugin scans ~/.claude/projects/<br/>Builds map: session_UUID → JSONL file ID
+
+    Note over CC,Store: Phase 1: Main agent starts
+
+    CC->>Plugin: POST /v1/messages<br/>metadata.user_id = "...session_AAA"
+    Plugin-->>Plugin: Extract session_AAA<br/>Lookup: session_AAA → file_XYZ.jsonl<br/>Set ctx.sessionId = "file_XYZ"
+    Plugin->>Proxy: ctx.sessionId = "file_XYZ"
+    Proxy->>Store: storeRequest(sessionId="file_XYZ")
+    Store-->>Store: sessionId is explicit → skip fingerprint<br/>conv_ID = SHA256("file_XYZ") = conv_777
+    Store-->>Store: Create conversation conv_777<br/>Records sessionId: "session_AAA"
+
+    Note over CC,Store: Phase 2: Subagent spawned
+
+    CC->>Sub: Agent tool: "research the codebase"
+    Sub->>Plugin: POST /v1/messages<br/>metadata.user_id = "...session_BBB"
+    Plugin-->>Plugin: Extract session_BBB<br/>Not in map yet → re-scan JSONL files<br/>Finds session_BBB in file_XYZ.jsonl!<br/>Set ctx.sessionId = "file_XYZ"
+    Plugin->>Proxy: ctx.sessionId = "file_XYZ"
+    Proxy->>Store: storeRequest(sessionId="file_XYZ")
+    Store-->>Store: conv_ID = SHA256("file_XYZ") = conv_777<br/>Same conversation! ✅
+    Store-->>Store: Entry added to conv_777<br/>with different agentKey
+
+    Note over CC,Store: Phase 2b: Plugin posts relationship metadata
+
+    Plugin->>Store: POST /api/relationships<br/>{sessionUuid: "session_BBB",<br/>parentUuid: "session_AAA",<br/>type: "child",<br/>agentName: "researcher"}
+    Store-->>Store: Resolve session_AAA → conv_777<br/>Store relationship: child agent<br/>within conv_777
+
+    Note over CC,Store: Phase 3: User resumes session (new CLI)
+
+    CC->>Plugin: POST /v1/messages<br/>metadata.user_id = "...session_CCC"
+    Plugin-->>Plugin: Extract session_CCC<br/>Re-scan: session_CCC in file_XYZ.jsonl!<br/>Set ctx.sessionId = "file_XYZ"
+    Plugin->>Proxy: ctx.sessionId = "file_XYZ"
+    Proxy->>Store: storeRequest(sessionId="file_XYZ")
+    Store-->>Store: conv_777 already exists ✅<br/>Entry added to same conversation
+
+    Note over CC,Store: Plugin posts continuation relationship
+    Plugin->>Store: POST /api/relationships<br/>{sessionUuid: "session_CCC",<br/>parentUuid: "session_AAA",<br/>type: "continuation"}
+
+    Note over CC,Store: Result: All entries in conv_777<br/>with rich relationship metadata<br/>Main → child(researcher) → continuation
