@@ -4,12 +4,14 @@ import { useSessionStore } from '@/stores/session'
 import type { InspectorTab } from '@/stores/session'
 import { useSSE } from '@/composables/useSSE'
 import { classifyEntries } from '@/utils/messages'
+import { initAnalytics, trackPage } from '@/utils/analytics'
 import AppToolbar from '@/components/AppToolbar.vue'
 import DashboardView from '@/components/DashboardView.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
 import SessionRail from '@/components/SessionRail.vue'
 import CompareView from '@/components/CompareView.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import AnalyticsConsent from '@/components/AnalyticsConsent.vue'
 import type { ConversationGroup, ProjectedEntry } from '@/api-types'
 
 const store = useSessionStore()
@@ -212,9 +214,26 @@ watch(
   },
 )
 
+// Track view changes (dashboard, inspector tabs, compare)
+watch(
+  () => [store.view, store.inspectorTab] as const,
+  ([view, tab]) => {
+    if (view === 'inspector') {
+      trackPage(`inspector/${tab}`)
+    } else if (view === 'dashboard' || view === 'compare') {
+      trackPage(view)
+    }
+  },
+)
+
 onMounted(async () => {
   try {
     store.initializeDensity()
+
+    // Initialize analytics (only activates if consent was previously granted)
+    if (!isSharedMode) {
+      initAnalytics()
+    }
 
     const sharedUrl = isSharedMode ? (window as unknown as Record<string, unknown>).__CONTEXTLENS_SHARED_SESSION_URL__ as string : undefined
     if (sharedUrl) {
@@ -226,6 +245,11 @@ onMounted(async () => {
         window.location.hash = HASH_SESSIONS
       }
       await applyHashRoute()
+      if (store.view === 'inspector') {
+        trackPage(`inspector/${store.inspectorTab}`)
+      } else if (store.view === 'dashboard' || store.view === 'compare') {
+        trackPage(store.view)
+      }
       window.addEventListener('hashchange', onHashChange)
 
       // Periodic refresh to catch any missed SSE events or handle disconnections
@@ -280,6 +304,7 @@ onUnmounted(() => {
       </div>
       </template>
     </div>
+    <AnalyticsConsent v-if="!isSharedMode" />
   </div>
 </template>
 

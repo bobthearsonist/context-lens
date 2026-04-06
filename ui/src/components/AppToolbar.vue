@@ -6,6 +6,7 @@ import { getExportUrl, uploadToContextlensIo, deleteSharedSession } from '@/api'
 import TagEditor from '@/components/TagEditor.vue'
 import PasteModal from '@/components/PasteModal.vue'
 import { scanImport } from '@/api'
+import { trackEvent } from '@/utils/analytics'
 
 const showPasteModal = ref(false)
 const importing = ref(false)
@@ -19,6 +20,7 @@ async function handleImport() {
     const { summaries } = await scanImport()
     await store.load()
     const total = summaries.reduce((s, r) => s + r.imported, 0)
+    if (total > 0) trackEvent('import')
     const details = summaries
       .filter(s => s.found > 0)
       .map(s => `${s.source}: ${s.imported} new`)
@@ -152,6 +154,7 @@ async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'sessio
   } catch {
     window.open(url, '_blank')
   }
+  trackEvent('export')
   showExportMenu.value = false
 }
 
@@ -179,6 +182,7 @@ async function handleUpload() {
   const convoId = store.selectedSessionId ?? undefined
   try {
     const result = await uploadToContextlensIo(convoId)
+    trackEvent('share')
     const msg = result.stats.total > 0
       ? `${result.summary}\n\nShare URL copied to clipboard:\n${result.url}`
       : `No sensitive data found.\n\nShare URL copied to clipboard:\n${result.url}`

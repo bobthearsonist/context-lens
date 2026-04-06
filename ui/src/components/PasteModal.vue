@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { pasteRequest } from '@/api'
 import { useSessionStore } from '@/stores/session'
+import { trackEvent } from '@/utils/analytics'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -34,6 +35,7 @@ async function submit() {
   loading.value = true
   try {
     const { conversationId } = await pasteRequest(raw)
+    trackEvent('paste')
     if (conversationId) {
       await store.loadConversationEntries(conversationId)
       store.selectSession(conversationId)
