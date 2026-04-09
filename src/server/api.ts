@@ -456,6 +456,8 @@ export function createApiApp(store: Store): Hono {
 
   app.get("/api/requests", (c) => {
     const isSummary = c.req.query("summary") === "true";
+    const sinceParam = c.req.query("since");
+    const sinceCutoff = sinceParam ? new Date(sinceParam).getTime() : null;
     const { grouped, ungrouped } = buildConversationGroups(store);
     const conversations = store.getConversations();
 
@@ -476,6 +478,20 @@ export function createApiApp(store: Store): Hono {
         };
         const latest = entries[0];
         const totalCost = entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0);
+
+        // Date-scoped aggregates: only entries on or after the `since` cutoff
+        let costSince = totalCost;
+        let entriesSince = entries.length;
+        if (sinceCutoff !== null && !Number.isNaN(sinceCutoff)) {
+          costSince = 0;
+          entriesSince = 0;
+          for (const e of entries) {
+            if (new Date(e.timestamp).getTime() >= sinceCutoff) {
+              costSince += e.costUsd ?? 0;
+              entriesSince++;
+            }
+          }
+        }
 
         const keyCounts = new Map<string, number>();
         for (const e of entries) {
@@ -509,6 +525,8 @@ export function createApiApp(store: Store): Hono {
           latestTotalTokens: latest.contextInfo.totalTokens,
           contextLimit: latest.contextLimit,
           totalCost,
+          costSince,
+          entriesSince,
           healthScore: latest.healthScore,
           tokenHistory,
           tags,
