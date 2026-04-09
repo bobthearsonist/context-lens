@@ -166,7 +166,8 @@ const todaySummaries = computed(() => {
 const totalSessions = computed(() => todaySummaries.value.length)
 
 const totalRequests = computed(() => {
-  return todaySummaries.value.reduce((sum, s) => sum + s.entryCount, 0)
+  const useScoped = kpiScope.value === 'today'
+  return todaySummaries.value.reduce((sum, s) => sum + (useScoped ? s.entriesSince : s.entryCount), 0)
 })
 
 const totalTokens = computed(() => {
@@ -174,7 +175,8 @@ const totalTokens = computed(() => {
 })
 
 const totalCost = computed(() => {
-  return todaySummaries.value.reduce((sum, s) => sum + s.totalCost, 0)
+  const useScoped = kpiScope.value === 'today'
+  return todaySummaries.value.reduce((sum, s) => sum + (useScoped ? s.costSince : s.totalCost), 0)
 })
 
 const avgHealth = computed(() => {

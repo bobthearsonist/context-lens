@@ -8,9 +8,11 @@ export async function fetchRequests(): Promise<ApiRequestsResponse> {
   return res.json()
 }
 
-export async function fetchSummary(): Promise<ApiSummaryResponse> {
-  const res = await fetch(`${BASE}/api/requests?summary=true`)
-  if (!res.ok) throw new Error(`GET /api/requests?summary=true failed: ${res.status}`)
+export async function fetchSummary(since?: string): Promise<ApiSummaryResponse> {
+  const params = new URLSearchParams({ summary: 'true' })
+  if (since) params.set('since', since)
+  const res = await fetch(`${BASE}/api/requests?${params}`)
+  if (!res.ok) throw new Error(`GET /api/requests?${params} failed: ${res.status}`)
   return res.json()
 }
 

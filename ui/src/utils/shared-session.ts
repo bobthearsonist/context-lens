@@ -301,6 +301,8 @@ export async function loadSharedSession(url: string): Promise<SharedSessionData>
       latestTotalTokens: latestTokens,
       contextLimit: latestEntry.contextLimit,
       totalCost,
+      costSince: totalCost,
+      entriesSince: sessionEntries.length,
       healthScore: null,
       tokenHistory: sessionEntries.map(e => e.usage?.inputTokens ?? e.contextInfo.totalTokens),
     }
@@ -342,6 +344,8 @@ export async function loadSharedSession(url: string): Promise<SharedSessionData>
       latestTotalTokens: latest.usage?.inputTokens ?? latest.contextInfo.totalTokens,
       contextLimit: latest.contextLimit,
       totalCost,
+      costSince: totalCost,
+      entriesSince: allEntries.length,
       healthScore: null,
       tokenHistory: allEntries.map(e => e.usage?.inputTokens ?? e.contextInfo.totalTokens),
     })

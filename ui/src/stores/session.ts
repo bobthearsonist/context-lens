@@ -241,7 +241,10 @@ export const useSessionStore = defineStore('session', () => {
     loading.value = true
     error.value = null
     try {
-      const data = await fetchSummary()
+      // Always pass today's midnight so scoped KPI fields (costSince, entriesSince) reflect today
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+      const data = await fetchSummary(todayStart.toISOString())
       revision.value = data.revision
       summaries.value = data.conversations
       ungroupedCount.value = data.ungroupedCount

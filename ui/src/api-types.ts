@@ -258,6 +258,10 @@ export interface ConversationSummary extends Conversation {
   latestTotalTokens: number;
   contextLimit: number;
   totalCost: number;
+  /** Cost of entries on or after the `since` cutoff (equals totalCost when no cutoff) */
+  costSince: number;
+  /** Count of entries on or after the `since` cutoff (equals entryCount when no cutoff) */
+  entriesSince: number;
   healthScore: HealthScore | null;
   /** Per-entry totalTokens in chronological order (oldest → newest), for sparkline rendering */
   tokenHistory: number[];
