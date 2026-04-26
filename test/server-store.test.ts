@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -678,6 +679,86 @@ describe("Store", () => {
     store2.loadState();
     assert.equal(store2.getConversations().size, 1);
     assert.equal(store2.getCapturedRequests().length, 1);
+
+    cleanup();
+  });
+
+  it("archives evicted sessions to LHAR files before removing them", async () => {
+    const { store, dir, cleanup } = makeStore({ maxSessions: 1 });
+
+    const body1 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: "session_11111111-1111-1111-1111-111111111111" },
+      messages: [{ role: "user", content: "one" }],
+    };
+    const ci1 = parseContextInfo("anthropic", body1, "anthropic-messages");
+    const e1 = store.storeRequest(
+      ci1,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      } as any,
+      "claude",
+      body1,
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+
+    const body2 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: "session_22222222-2222-2222-2222-222222222222" },
+      messages: [{ role: "user", content: "two" }],
+    };
+    const ci2 = parseContextInfo("anthropic", body2, "anthropic-messages");
+    store.storeRequest(
+      ci2,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      } as any,
+      "claude",
+      body2,
+    );
+
+    // The first session should have been archived
+    const evictedConvoId = e1.conversationId;
+    assert.ok(evictedConvoId, "first entry should have a conversationId");
+    const archivePath = path.join(
+      dir,
+      "data",
+      "archive",
+      `${evictedConvoId}.lhar`,
+    );
+    assert.ok(
+      existsSync(archivePath),
+      `archive file should exist at ${archivePath}`,
+    );
+
+    // Archive should be valid JSONL with at least one record line
+    const archiveContent = readFileSync(archivePath, "utf8");
+    const archiveLines = archiveContent.split("\n").filter((l) => l.length > 0);
+    assert.ok(
+      archiveLines.length >= 1,
+      "archive should contain at least one LHAR record",
+    );
+    // Find first entry record (not a session preamble line)
+    const entryLine = archiveLines.find((l) => {
+      const parsed = JSON.parse(l);
+      return parsed.gen_ai !== undefined;
+    });
+    assert.ok(
+      entryLine,
+      "archive should contain at least one LHAR entry record",
+    );
+    const record = JSON.parse(entryLine);
+    assert.ok(record.gen_ai.request, "LHAR record should have gen_ai.request");
+    assert.ok(
+      record.gen_ai.response,
+      "LHAR record should have gen_ai.response",
+    );
+    assert.ok(record.trace_id, "LHAR record should have a trace_id");
 
     cleanup();
   });

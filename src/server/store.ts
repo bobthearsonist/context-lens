@@ -27,6 +27,7 @@ import {
   extractResponseId,
   normalizeComposition,
   parseResponseUsage,
+  toLharJsonl,
 } from "../lhar.js";
 import { ConversationLineSchema, EntryLineSchema } from "../schemas.js";
 import { safeFilenamePart } from "../server-utils.js";
@@ -58,6 +59,7 @@ export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
   private readonly detailDir: string;
+  private readonly archiveDir: string;
   private readonly maxSessions: number;
   private readonly maxCompactMessages: number;
   private readonly privacy: PrivacyLevel;
@@ -97,6 +99,7 @@ export class Store {
     this.dataDir = opts.dataDir;
     this.stateFile = opts.stateFile;
     this.detailDir = path.join(opts.dataDir, "details");
+    this.archiveDir = path.join(opts.dataDir, "archive");
     this.maxSessions = opts.maxSessions;
     this.maxCompactMessages = opts.maxCompactMessages;
     this.privacy = opts.privacy ?? "standard";
@@ -108,6 +111,11 @@ export class Store {
     }
     try {
       fs.mkdirSync(this.detailDir, { recursive: true });
+    } catch {
+      /* Directory may already exist */
+    }
+    try {
+      fs.mkdirSync(this.archiveDir, { recursive: true });
     } catch {
       /* Directory may already exist */
     }
@@ -559,6 +567,28 @@ export class Store {
         .slice(0, sorted.length - this.maxSessions)
         .map((s) => s[0]);
       const evictSet = new Set(toEvict);
+      // Archive evicted sessions to LHAR files before removing them
+      for (const cid of toEvict) {
+        const sessionEntries = this.capturedRequests.filter(
+          (r) => r.conversationId === cid,
+        );
+        if (sessionEntries.length > 0) {
+          const archiveConvos = new Map<string, Conversation>();
+          const convo = this.conversations.get(cid);
+          if (convo) archiveConvos.set(cid, convo);
+          try {
+            const lharContent = toLharJsonl(
+              sessionEntries,
+              archiveConvos,
+              this.privacy,
+            );
+            const archivePath = path.join(this.archiveDir, `${cid}.lhar`);
+            fs.writeFileSync(archivePath, lharContent, "utf8");
+          } catch {
+            /* best-effort archive; do not block eviction on write failure */
+          }
+        }
+      }
       // Remove all entries belonging to evicted sessions
       for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
         const evictEntry = this.capturedRequests[i];
