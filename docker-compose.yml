@@ -9,7 +9,6 @@ services:
     environment:
       CONTEXT_LENS_NO_UPDATE_CHECK: "1"
       CONTEXT_LENS_BIND_HOST: "0.0.0.0"
-      CONTEXT_LENS_MAX_SESSIONS: "1000"
     volumes:
       - ~/.context-lens:/root/.context-lens
     restart: unless-stopped
@@ -33,7 +32,6 @@ services:
 #    environment:
 #      CONTEXT_LENS_NO_UPDATE_CHECK: "1"
 #      CONTEXT_LENS_BIND_HOST: "0.0.0.0"
-      CONTEXT_LENS_MAX_SESSIONS: "1000"
 #      CONTEXT_LENS_INGEST_URL: "http://analysis:4041/api/ingest"
 #
 #  analysis:
