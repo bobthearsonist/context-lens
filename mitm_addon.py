@@ -64,6 +64,8 @@ CAPTURE_PATTERNS = [
     ("generativelanguage.googleapis.com", "/v1", "gemini", None),
     # Gemini Code Assist / antigravity endpoint
     ("cloudcode-pa.googleapis.com", "/v1internal:", "gemini", "gemini"),
+    # PPQ.ai OpenAI-compatible chat completions
+    ("api.ppq.ai", "/chat/completions", "openai", "ppq"),
 ]
 
 # Catch-all path patterns: match any host with these path substrings.
