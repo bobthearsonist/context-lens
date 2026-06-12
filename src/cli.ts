@@ -11,6 +11,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  addProvidersBasedOnAuthJson,
+  addProvidersBasedOnEnvVars,
   CLI_CONSTANTS,
   formatHelpText,
   getMitmConfig,
@@ -841,6 +843,21 @@ if (parsedArgs.commandName === "analyze") {
         "https://cloudcode-pa.googleapis.com",
         "https://us-central1-aiplatform.googleapis.com",
       ]);
+
+      const authJsonPath = join(sourceDir, "auth.json");
+      if (fs.existsSync(authJsonPath)) {
+        let authConfig: Record<string, unknown> = {};
+        try {
+          authConfig = JSON.parse(fs.readFileSync(authJsonPath, "utf8"));
+        } catch {
+          console.error(
+            "Warning: ~/.pi/agent/auth.json is not valid JSON; ignoring",
+          );
+        }
+        addProvidersBasedOnAuthJson(authConfig, proxyBaseUrl, providers);
+      }
+
+      addProvidersBasedOnEnvVars(process.env, proxyBaseUrl, providers);
 
       // Rewrite every provider that has an external baseUrl, regardless of its
       // key name. For providers whose upstream isn't natively known to the proxy,
