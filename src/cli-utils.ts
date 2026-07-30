@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,8 +19,8 @@ const PROXY_URL = `http://localhost:${PROXY_PORT}`;
 const UI_PORT = Number.isNaN(config.ui.port) ? 4041 : config.ui.port;
 const UI_URL = `http://localhost:${UI_PORT}`;
 
-const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
-const BRYTI_DATA_DIR_PREFIX = "/tmp/context-lens-bryti-";
+const PI_AGENT_DIR_PREFIX = join(tmpdir(), "context-lens-pi-agent-");
+const BRYTI_DATA_DIR_PREFIX = join(tmpdir(), "context-lens-bryti-");
 const COMMAND_ALIASES: Record<string, string> = {
   cc: "claude",
   cx: "codex",
@@ -335,68 +337,45 @@ export function formatHelpText(): string {
     `context-lens v${VERSION}`,
     "",
     "Usage:",
-    "  context-lens [global-options] [tool-or-command] [args...]",
-    "  context-lens [global-options] -- [command] [args...]",
-    "  context-lens [global-options]   (no command = standalone mode)",
-    "  context-lens doctor",
-    "  context-lens stop",
-    "  context-lens background <start|stop|status> [--no-ui]",
-    "  context-lens analyze <session.lhar> [options]",
+    "  context-lens [options] [tool] [args...]",
+    "  context-lens [options] -- [command] [args...]",
+    "  context-lens                 (standalone proxy + UI)",
+    "",
+    "Tools:",
+    "  claude, codex, gemini/gm, aider, pi, bryti, copilot, cline, opencode",
+    "",
+    "Commands:",
+    "  doctor",
+    "  stop",
+    "  background <start|stop|status> [--no-ui]",
+    "  analyze <session.lhar> [analyze-options]",
+    "",
+    "Options:",
+    "  -h, --help        Show this help text",
+    "  -v, --version     Show version",
+    `  --no-open         Don't auto-open ${UI_URL}`,
+    "  --no-ui           Run proxy only, without analysis or web UI",
+    "  --mitm            Force mitmproxy interception, mainly for Pi subscription models",
     "",
     "Examples:",
     "  context-lens claude",
     "  context-lens codex",
-    "  context-lens cline",
-    "  context-lens copilot",
-    "  context-lens opencode",
     "  context-lens gm",
-    "  context-lens bryti",
-    "  context-lens --privacy=minimal aider --model claude-sonnet-4",
-    "  context-lens -- python my_agent.py",
     "  context-lens doctor",
-    "  context-lens stop",
-    "  context-lens background start --no-ui",
-    "  context-lens analyze ~/.context-lens/data/claude-abc123.lhar",
-    "  context-lens analyze session.lhar --json --main-only",
-    "  context-lens analyze session.lhar --composition=pre-compaction",
+    "  context-lens -- python my_agent.py",
+    "  context-lens analyze ~/.context-lens/data/session.lhar --main-only",
     "",
-    "Global options:",
-    "  -h, --help             Show this help text",
-    "  -v, --version          Show version",
-    "  --privacy <level>      Set privacy level: minimal|standard|full",
-    `  --no-open              Don't auto-open ${UI_URL}`,
-    "  --no-ui                Run proxy only (no analysis/web UI server)",
-    "  --no-update-check      Skip npm update check for this run",
-    "  --mitm                 Use mitmproxy for interception instead of base URL override (only recommend forcing for Pi)",
-    "  --redact[=preset]      Strip sensitive data before capture (experimental). Preset: secrets|pii|strict (default: secrets)",
-    "  --rehydrate            With --redact: restore original values in responses (off by default)",
-    "",
-    "Command aliases:",
+    "Aliases:",
     "  cc -> claude",
     "  cx -> codex",
     "  gm -> gemini",
     "  oc -> opencode",
     "",
-    "Shell alias (add to ~/.zshrc or ~/.bashrc):",
-    "  alias cpi='context-lens pi'",
-    "",
-    "Environment variables:",
-    "  UPSTREAM_OPENAI_URL        Override OpenAI upstream (for OpenAI-compatible APIs)",
-    "  UPSTREAM_ANTHROPIC_URL     Override Anthropic upstream",
-    "  UPSTREAM_GEMINI_URL        Override Gemini upstream",
-    "",
-    "Notes:",
-    "  - No command starts standalone mode (proxy + analysis/web UI by default).",
-    "  - 'codex', 'cline', and 'opencode' use mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
-    "  - 'cline' with Anthropic OAuth routes through api.cline.bot; mitmproxy intercepts that traffic.",
-    "  - 'copilot' (GitHub Copilot CLI, @github/copilot) uses COPILOT_API_URL to redirect traffic through the proxy; no mitmproxy needed.",
-    "  - 'pi --mitm' uses mitmproxy for full interception, useful for subscription-based models (openai-codex provider).",
-    "  - 'doctor' is a local diagnostics command.",
-    "  - 'background' manages detached proxy/web-ui processes.",
-    "  - 'analyze' reads an .lhar file and prints session statistics.",
+    "Advanced capture and privacy knobs are still supported for scripts.",
+    "See README.md and ~/.context-lens/config.toml for persistent settings.",
     "",
     "Analyze options:",
-    "  --json                    Output as JSON instead of formatted text",
+    "  --json                    Output JSON",
     "  --no-path                 Omit the agent path trace",
     "  --main-only               Only analyze main agent entries",
     "  --composition=last        Composition of the last entry (default)",
@@ -426,4 +405,133 @@ export function getMitmConfig(): MitmConfig {
     lensSource: config.mitm.lensSource,
     lensSessionId: config.mitm.lensSessionId,
   };
+}
+
+// copied from https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts
+const piEnvMap: Record<string, string> = {
+  openai: "OPENAI_API_KEY",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  google: "GEMINI_API_KEY",
+  "google-vertex": "GOOGLE_CLOUD_API_KEY",
+  groq: "GROQ_API_KEY",
+  cerebras: "CEREBRAS_API_KEY",
+  xai: "XAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+  zai: "ZAI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  "minimax-cn": "MINIMAX_CN_API_KEY",
+  moonshotai: "MOONSHOT_API_KEY",
+  "moonshotai-cn": "MOONSHOT_API_KEY",
+  huggingface: "HF_TOKEN",
+  fireworks: "FIREWORKS_API_KEY",
+  opencode: "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
+  "kimi-coding": "KIMI_API_KEY",
+  "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+  "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+  xiaomi: "XIAOMI_API_KEY",
+  "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+};
+
+export function addProvidersBasedOnAuthJson(
+  authConfig: Record<string, unknown>,
+  proxyBaseUrl: string,
+  providers: { [x: string]: unknown },
+) {
+  if (authConfig && typeof authConfig === "object") {
+    for (const providerName of Object.keys(authConfig)) {
+      if (!Object.hasOwn(providers, providerName)) {
+        providers[providerName] = { baseUrl: proxyBaseUrl };
+      }
+    }
+  }
+}
+
+export function addProvidersBasedOnEnvVars(
+  envDictionary: Record<string, string | undefined>,
+  proxyBaseUrl: string,
+  providers: { [x: string]: unknown },
+) {
+  for (const [providerName, envVarName] of Object.entries(piEnvMap)) {
+    if (
+      Object.hasOwn(envDictionary, envVarName) &&
+      !Object.hasOwn(providers, providerName)
+    ) {
+      providers[providerName] = { baseUrl: proxyBaseUrl };
+    }
+  }
+}
+
+export function resolveLensSource(
+  setting: string,
+  commandName: string,
+): string {
+  if (setting === "commandName") return commandName;
+  if (setting === "auto") return "";
+  return setting;
+}
+
+export function resolveLensSessionId(
+  setting: string,
+  randomHex: () => string = () => randomBytes(4).toString("hex"),
+): string {
+  if (setting === "random") return randomHex();
+  if (setting === "none") return "";
+  return setting;
+}
+
+/**
+ * Convert a reverse-proxy tool config into an HTTPS forward-proxy config.
+ * Values set to [CA_CERT_PATH] are replaced later once the CA file is known.
+ */
+export function toMitmToolConfig(
+  toolConfig: ToolConfig,
+  mitmConfig: MitmConfig,
+): ToolConfig {
+  return {
+    ...toolConfig,
+    childEnv: {
+      https_proxy: mitmConfig.proxyUrl,
+      NPM_CONFIG_HTTPS_PROXY: mitmConfig.proxyUrl,
+      WSS_PROXY: mitmConfig.proxyUrl,
+      NODE_USE_ENV_PROXY: "1",
+      SSL_CERT_FILE: "[CA_CERT_PATH]",
+      NODE_EXTRA_CA_CERTS: "[CA_CERT_PATH]",
+      REQUESTS_CA_BUNDLE: "[CA_CERT_PATH]",
+    },
+    needsMitm: true,
+  };
+}
+
+/**
+ * Add a per-run session path segment to plain context-lens proxy URLs.
+ * URLs already carrying a second path segment are left untouched.
+ */
+export function injectSessionTagIntoProxyEnv(
+  env: Record<string, string | undefined>,
+  sessionTag: string,
+  proxyUrl = PROXY_URL,
+): Record<string, string | undefined> {
+  const result: Record<string, string | undefined> = { ...env };
+  const proxyBase = `${proxyUrl}/`;
+
+  for (const key of Object.keys(result)) {
+    const value = result[key];
+    if (typeof value !== "string") continue;
+    if (!value.startsWith(proxyBase)) continue;
+
+    const hadTrailingSlash = value.endsWith("/");
+    const after = value.slice(proxyBase.length).replace(/\/$/, "");
+    if (!after || after.includes("/")) continue;
+
+    const suffix = hadTrailingSlash ? "/" : "";
+    result[key] = `${proxyBase}${after}/${sessionTag}${suffix}`;
+  }
+
+  return result;
 }
