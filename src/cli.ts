@@ -114,7 +114,10 @@ if (parsedArgs.commandName === "analyze") {
       if (!proxy.killed) proxy.kill();
       process.exit(code);
     }
-    proxy.on("exit", (code) => shutdownStandaloneProxyOnly(code || 0));
+    // A proxy exit here is always a failure — surface it as non-zero so a
+    // supervisor (nodemon --exitcrash / container restart policy) can self-heal
+    // instead of treating an OOM/signal death (code == null) as a clean exit.
+    proxy.on("exit", (code) => shutdownStandaloneProxyOnly(code || 1));
     process.on("SIGINT", () => shutdownStandaloneProxyOnly(0));
     process.on("SIGTERM", () => shutdownStandaloneProxyOnly(0));
     process.stdin.resume();
@@ -138,8 +141,11 @@ if (parsedArgs.commandName === "analyze") {
       if (!analysis.killed) analysis.kill();
       process.exit(code);
     }
-    proxy.on("exit", (code) => shutdownStandalone(code || 0));
-    analysis.on("exit", (code) => shutdownStandalone(code || 0));
+    // A proxy/analysis exit here is always a failure — surface it as non-zero
+    // so a supervisor (nodemon --exitcrash / container restart policy) can
+    // self-heal instead of treating an OOM/signal death (code == null) as clean.
+    proxy.on("exit", (code) => shutdownStandalone(code || 1));
+    analysis.on("exit", (code) => shutdownStandalone(code || 1));
     process.on("SIGINT", () => shutdownStandalone(0));
     process.on("SIGTERM", () => shutdownStandalone(0));
     // Prevent early exit
