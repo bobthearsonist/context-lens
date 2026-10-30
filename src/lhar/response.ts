@@ -65,6 +65,7 @@ function applyUsageDetails(usage: any, result: ParsedResponseUsage): void {
   result.thinkingTokens =
     usage.completion_tokens_details?.reasoning_tokens ||
     usage.output_tokens_details?.reasoning_tokens ||
+    usage.output_tokens_details?.thinking_tokens ||
     usage.thinking_tokens ||
     usage.reasoning_tokens ||
     result.thinkingTokens;

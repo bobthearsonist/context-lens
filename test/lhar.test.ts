@@ -695,6 +695,23 @@ describe("parseResponseUsage", () => {
     assert.equal(usage.outputTokens, 100);
   });
 
+  it("parses Anthropic thinking_tokens from output_tokens_details", () => {
+    const resp = {
+      model: "claude-opus-5-5",
+      stop_reason: "tool_use",
+      usage: {
+        input_tokens: 2,
+        cache_creation_input_tokens: 50518,
+        cache_read_input_tokens: 0,
+        output_tokens: 431,
+        output_tokens_details: { thinking_tokens: 339 },
+      },
+    };
+    const usage = parseResponseUsage(resp);
+    assert.equal(usage.thinkingTokens, 339);
+    assert.equal(usage.outputTokens, 431);
+  });
+
   it("parses streaming Gemini usageMetadata chunks", () => {
     const chunks = [
       'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5,"cachedContentTokenCount":20},"modelVersion":"gemini-2.0-flash"}',
