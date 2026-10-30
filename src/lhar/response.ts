@@ -201,6 +201,9 @@ function parseStreamingUsage(
     if (parsed.type === "message_delta") {
       if (parsed.usage) {
         result.outputTokens = parsed.usage.output_tokens || result.outputTokens;
+        result.thinkingTokens =
+          parsed.usage.output_tokens_details?.thinking_tokens ||
+          result.thinkingTokens;
       }
     }
 

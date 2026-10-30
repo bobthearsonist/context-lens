@@ -606,6 +606,21 @@ describe("parseResponseUsage", () => {
     assert.deepEqual(usage.finishReasons, ["end_turn"]);
   });
 
+  it("parses Anthropic streaming thinking tokens from message_delta", () => {
+    const chunks = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":50518}}}',
+      "",
+      "event: message_delta",
+      'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":431,"output_tokens_details":{"thinking_tokens":339}}}',
+      "",
+      "data: [DONE]",
+    ].join("\n");
+    const usage = parseResponseUsage({ streaming: true, chunks });
+    assert.equal(usage.thinkingTokens, 339);
+    assert.equal(usage.outputTokens, 431);
+  });
+
   it("parses streaming cache write tokens", () => {
     const chunks = [
       "event: message_start",
