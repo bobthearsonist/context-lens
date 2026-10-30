@@ -109,7 +109,10 @@ function findPrunedMessage(origIdx: number): ParsedMessage | null {
   if (!s) return null
   // entries are newest-first; skip [0] (current turn), search older ones
   for (let i = 1; i < s.entries.length; i++) {
-    const msgs = s.entries[i].contextInfo.messages
+    const ci = s.entries[i].contextInfo
+    // Trimmed turns don't hold a positional window, so indexes don't apply.
+    if (ci.messagesDeltaOnly) continue
+    const msgs = ci.messages
     if (msgs && msgs.length > origIdx) return msgs[origIdx]
   }
   return null
@@ -351,6 +354,8 @@ function jumpToFutureMessage(msgIndex: number) {
   // whose message count is greater than msgIndex.
   let targetEntry: typeof entries[0] | null = null
   for (let i = entries.length - 1; i >= 0; i--) {
+    // A trimmed turn's count is its new messages, not its window size.
+    if (entries[i].contextInfo.messagesDeltaOnly) continue
     const msgCount = entries[i].contextInfo.messages?.length ?? 0
     if (msgCount > msgIndex) {
       targetEntry = entries[i]

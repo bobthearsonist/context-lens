@@ -66,6 +66,10 @@ const maxCompactMessages = parseInt(
   process.env.CONTEXT_LENS_MAX_COMPACT_MESSAGES || "60",
   10,
 );
+const fullMessageEntries = parseInt(
+  process.env.CONTEXT_LENS_FULL_MESSAGE_ENTRIES || "3",
+  10,
+);
 
 // --- Setup ---
 
@@ -74,6 +78,7 @@ const store = new Store({
   stateFile: path.join(dataDir, "state.jsonl"),
   maxSessions,
   maxCompactMessages,
+  fullMessageEntries,
   privacy,
 });
 

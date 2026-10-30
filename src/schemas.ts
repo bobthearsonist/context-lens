@@ -114,6 +114,8 @@ const ContextInfoSchema = v.object({
   systemPrompts: v.array(SystemPromptSchema),
   tools: v.array(v.unknown()),
   messages: v.array(ParsedMessageSchema),
+  newMessageIndexes: v.optional(v.array(v.number())),
+  messagesDeltaOnly: v.optional(v.boolean()),
 });
 
 // ---------------------------------------------------------------------------

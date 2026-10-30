@@ -40,8 +40,21 @@ import type {
   RequestMeta,
   ResponseData,
 } from "../types.js";
+import { readLinesSync, writeLinesAtomicSync } from "./line-reader.js";
+import { messageSignature, newMessageIndexes } from "./message-window.js";
 import { projectEntry } from "./projection.js";
 import { TagsStore } from "./tags-store.js";
+
+/** Appends below this size never trigger a compacting rewrite of the state file. */
+const MIN_COMPACT_BYTES = 64 * 1024 * 1024;
+
+/** Entries of one conversation/agent that share a sliding message window. */
+interface MessageStream {
+  /** Entries still holding their full window, oldest first. */
+  full: CapturedEntry[];
+  /** Signatures of the newest entry's window, when already computed. */
+  lastSignatures?: string[];
+}
 
 export interface StoreChangeEvent {
   type: string;
@@ -60,9 +73,18 @@ export class Store {
   private readonly detailDir: string;
   private readonly maxSessions: number;
   private readonly maxCompactMessages: number;
+  private readonly fullMessageEntries: number;
   private readonly privacy: PrivacyLevel;
 
   private capturedRequests: CapturedEntry[] = [];
+  private messageStreams = new Map<string, MessageStream>(); // conversationId + agentKey -> stream
+
+  // Set when the state file exists but could not be read. Nothing is written
+  // for the rest of the run, so a failed read can't let a later save replace
+  // the file with whatever little is in memory.
+  private persistenceDisabled = false;
+  private stateBytesAtLastSave = 0;
+  private bytesAppendedSinceSave = 0;
   private conversations = new Map<string, Conversation>(); // fingerprint -> conversation
   private responseIdToConvo = new Map<string, string>(); // response_id -> conversationId
   private diskSessionsWritten = new Set<string>();
@@ -92,6 +114,8 @@ export class Store {
     stateFile: string;
     maxSessions: number;
     maxCompactMessages: number;
+    /** Newest entries per conversation/agent that keep their full message window. */
+    fullMessageEntries?: number;
     privacy?: PrivacyLevel;
   }) {
     this.dataDir = opts.dataDir;
@@ -99,6 +123,7 @@ export class Store {
     this.detailDir = path.join(opts.dataDir, "details");
     this.maxSessions = opts.maxSessions;
     this.maxCompactMessages = opts.maxCompactMessages;
+    this.fullMessageEntries = Math.max(1, opts.fullMessageEntries ?? 3);
     this.privacy = opts.privacy ?? "standard";
 
     try {
@@ -157,17 +182,11 @@ export class Store {
   }
 
   loadState(): void {
-    let content: string;
-    try {
-      content = fs.readFileSync(this.stateFile, "utf8");
-    } catch {
-      return; // No state file, fresh start
-    }
-    const lines = content.split("\n").filter((l) => l.length > 0);
     let loadedEntries = 0;
     let maxId = 0;
+    let trimmedOnLoad = 0;
     const loadedEntriesBuffer: CapturedEntry[] = [];
-    for (const line of lines) {
+    const onLine = (line: string): void => {
       try {
         const raw = JSON.parse(line);
 
@@ -177,7 +196,7 @@ export class Store {
             console.warn(
               `State: skipping invalid conversation line: ${v.summarize(result.issues)}`,
             );
-            continue;
+            return;
           }
           const c = result.output.data as Conversation;
           this.conversations.set(c.id, c);
@@ -188,7 +207,7 @@ export class Store {
             console.warn(
               `State: skipping invalid entry line (id=${raw.data?.id}): ${v.summarize(result.issues)}`,
             );
-            continue;
+            return;
           }
           const projected = result.output.data;
           // The schema validates structure; cast to domain types for fields
@@ -208,9 +227,20 @@ export class Store {
                 | OutputAlert[]
                 | undefined) || [],
           };
+          // Re-compact blocks so state written by older versions sheds what
+          // compaction now drops (thinking signatures). Idempotent otherwise.
+          for (const m of entry.contextInfo.messages) {
+            if (m.contentBlocks)
+              m.contentBlocks = m.contentBlocks.map((b) =>
+                this.compactBlock(b),
+              );
+          }
           loadedEntriesBuffer.push(entry);
           if (entry.id > maxId) maxId = entry.id;
           loadedEntries++;
+          // The file is chronological, so trimming as we go keeps memory
+          // bounded even for state written before trimming existed.
+          if (this.trackMessageWindow(entry)) trimmedOnLoad++;
         }
       } catch (err: unknown) {
         console.error(
@@ -218,6 +248,16 @@ export class Store {
           err instanceof Error ? err.message : String(err),
         );
       }
+    };
+    try {
+      this.stateBytesAtLastSave = readLinesSync(this.stateFile, onLine);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return; // No state file, fresh start
+      this.persistenceDisabled = true;
+      console.error(
+        `State file ${this.stateFile} could not be read (${err instanceof Error ? err.message : String(err)}). ` +
+          "Continuing with what was loaded; the file will not be written until the next restart.",
+      );
     }
     // Reverse entries to match runtime order (newest first)
     this.capturedRequests = loadedEntriesBuffer.reverse();
@@ -237,11 +277,14 @@ export class Store {
       this.backfillTotalTokensFromUsage();
       const tokenFixups = this.restoreTokenCountsFromDetails();
       this.backfillHealthScores();
-      if (migrated > 0 || tokenFixups > 0) {
+      if (migrated > 0 || tokenFixups > 0 || trimmedOnLoad > 0) {
         this.saveState();
       }
       console.log(
-        `Restored ${loadedEntries} entries from ${this.conversations.size} conversations`,
+        `Restored ${loadedEntries} entries from ${this.conversations.size} conversations` +
+          (trimmedOnLoad > 0
+            ? ` (trimmed ${trimmedOnLoad} older entries to their new messages)`
+            : ""),
       );
       // Sync tags: remove tags for conversations that no longer exist
       this.tagsStore.syncTags(new Set(this.conversations.keys()));
@@ -579,6 +622,7 @@ export class Store {
       for (const cid of toEvict) {
         this.conversations.delete(cid);
         this.diskSessionsWritten.delete(cid);
+        this.forgetMessageStreams(cid);
         for (const [rid, rcid] of this.responseIdToConvo) {
           if (rcid === cid) this.responseIdToConvo.delete(rid);
         }
@@ -600,6 +644,7 @@ export class Store {
     this.logToDisk(entry);
     this.saveEntryDetail(entry);
     this.compactEntry(entry);
+    this.trackMessageWindow(entry);
     // saveState() already wrote the full state including this entry,
     // so skip the append to avoid duplicating it in the file.
     if (!evicted) {
@@ -617,6 +662,7 @@ export class Store {
         this.capturedRequests.splice(i, 1);
     }
     this.diskSessionsWritten.delete(convoId);
+    this.forgetMessageStreams(convoId);
     for (const [rid, cid] of this.responseIdToConvo) {
       if (cid === convoId) this.responseIdToConvo.delete(rid);
     }
@@ -646,6 +692,7 @@ export class Store {
 
     this.capturedRequests.length = 0;
     this.conversations.clear();
+    this.messageStreams.clear();
     this.diskSessionsWritten.clear();
     this.responseIdToConvo.clear();
     this.geminiSessionTracker.clear();
@@ -752,6 +799,7 @@ export class Store {
     const candidates: CapturedEntry[] = [];
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
+      if (ci.messagesDeltaOnly) continue; // not a truncated window
       if (ci.messages.length >= this.maxCompactMessages) continue;
       const msgTokenSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
       if (ci.messagesTokens === msgTokenSum) {
@@ -813,6 +861,8 @@ export class Store {
     };
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
+      // Totals of a trimmed entry cover messages it no longer holds.
+      if (ci.messagesDeltaOnly) continue;
       let messagesTokens = 0;
       let changed = false;
       for (const msg of ci.messages) {
@@ -980,7 +1030,14 @@ export class Store {
       default: {
         // Handle thinking blocks and other unknown types; truncate text-like fields.
         // Use typed narrowing so this stays correct when new block types are added.
-        const fallback = b as Record<string, unknown>;
+        // Thinking signatures and redacted thinking data are opaque, often
+        // kilobytes each, and repeat on every later turn; detail files keep them.
+        const { signature: _signature, ...fallback } = b as Record<
+          string,
+          unknown
+        >;
+        if (fallback.type === "redacted_thinking")
+          return { type: "redacted_thinking" } as unknown as ContentBlock;
         if (typeof fallback.thinking === "string")
           return {
             ...fallback,
@@ -991,7 +1048,7 @@ export class Store {
             ...fallback,
             text: fallback.text.slice(0, limit),
           } as unknown as ContentBlock;
-        return b;
+        return fallback as unknown as ContentBlock;
       }
     }
   }
@@ -1040,6 +1097,12 @@ export class Store {
 
   // Compact contextInfo: keep metadata and token counts, drop large text payloads
   private compactContextInfo(ci: ContextInfo) {
+    const messages = this.compactMessages(ci.messages);
+    // compactMessages keeps the newest messages; shift indexes past any it cut.
+    const cut = ci.messages.length - messages.length;
+    const newMessageIndexes = ci.newMessageIndexes
+      ?.map((i) => i - cut)
+      .filter((i) => i >= 0);
     return {
       provider: ci.provider,
       apiFormat: ci.apiFormat,
@@ -1050,7 +1113,9 @@ export class Store {
       totalTokens: ci.totalTokens,
       systemPrompts: [],
       tools: [],
-      messages: this.compactMessages(ci.messages),
+      messages,
+      ...(newMessageIndexes && { newMessageIndexes }),
+      ...(ci.messagesDeltaOnly && { messagesDeltaOnly: true }),
     };
   }
 
@@ -1094,6 +1159,7 @@ export class Store {
     entry: CapturedEntry,
     conversationId: string | null,
   ): void {
+    if (this.persistenceDisabled) return;
     let lines = "";
 
     if (conversationId) {
@@ -1110,11 +1176,21 @@ export class Store {
 
     try {
       fs.appendFileSync(this.stateFile, lines);
+      this.bytesAppendedSinceSave += Buffer.byteLength(lines);
     } catch (err: unknown) {
       console.error(
         "State append error:",
         err instanceof Error ? err.message : String(err),
       );
+    }
+
+    // Appends keep superseded copies (repeated conversation lines, full
+    // windows of entries trimmed since), so rewrite once the file has doubled.
+    if (
+      this.bytesAppendedSinceSave >
+      Math.max(MIN_COMPACT_BYTES, this.stateBytesAtLastSave)
+    ) {
+      this.saveState();
     }
   }
 
@@ -1127,25 +1203,93 @@ export class Store {
    * restore the in-memory newest-first order.
    */
   private saveState(): void {
-    let lines = "";
-    for (const [, convo] of this.conversations) {
-      lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
-    }
-    // Write oldest-first so loadState's reverse() produces newest-first
-    for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
-      const entry = this.capturedRequests[i];
-      lines += `${JSON.stringify({
-        type: "entry",
-        data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),
-      })}\n`;
-    }
+    if (this.persistenceDisabled) return;
     try {
-      fs.writeFileSync(this.stateFile, lines);
+      // Streamed line by line: one string holding the whole state would hit
+      // V8's maximum string length once the state passes ~512 MB.
+      this.stateBytesAtLastSave = writeLinesAtomicSync(
+        this.stateFile,
+        this.stateLines(),
+      );
+      this.bytesAppendedSinceSave = 0;
     } catch (err: unknown) {
       console.error(
         "State save error:",
         err instanceof Error ? err.message : String(err),
       );
+    }
+  }
+
+  private *stateLines(): Generator<string> {
+    for (const [, convo] of this.conversations) {
+      yield JSON.stringify({ type: "conversation", data: convo });
+    }
+    // Write oldest-first so loadState's reverse() produces newest-first
+    for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
+      const entry = this.capturedRequests[i];
+      yield JSON.stringify({
+        type: "entry",
+        data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),
+      });
+    }
+  }
+
+  /**
+   * Keep the full message window only on the newest entries of each
+   * conversation/agent stream. Each turn's capture repeats the previous
+   * turn's window, so a long session otherwise stores the same history once
+   * per request. Older entries keep just the messages that were new at their
+   * turn: every message is still stored once, and the full content of any
+   * turn stays available from its detail file. Entries must arrive oldest
+   * first. Returns true if an older entry was trimmed.
+   */
+  private trackMessageWindow(entry: CapturedEntry): boolean {
+    const ci = entry.contextInfo;
+    if (!entry.conversationId || ci.messagesDeltaOnly) return false;
+    const key = `${entry.conversationId}\u0000${entry.agentKey ?? ""}`;
+    let stream = this.messageStreams.get(key);
+    if (!stream) {
+      stream = { full: [] };
+      this.messageStreams.set(key, stream);
+    }
+
+    const previous = stream.full[stream.full.length - 1];
+    let signatures: string[] | undefined;
+    if (ci.newMessageIndexes === undefined) {
+      signatures = ci.messages.map(messageSignature);
+      ci.newMessageIndexes = previous
+        ? newMessageIndexes(
+            stream.lastSignatures ??
+              previous.contextInfo.messages.map(messageSignature),
+            signatures,
+          )
+        : ci.messages.map((_, i) => i);
+    }
+    stream.lastSignatures = signatures;
+    stream.full.push(entry);
+
+    let trimmed = false;
+    while (stream.full.length > this.fullMessageEntries) {
+      const old = stream.full.shift();
+      if (!old) break;
+      const oldCi = old.contextInfo;
+      const keep = oldCi.newMessageIndexes;
+      if (keep) {
+        oldCi.messages = keep
+          .map((i) => oldCi.messages[i])
+          .filter((m) => m !== undefined);
+      }
+      oldCi.newMessageIndexes = undefined;
+      oldCi.messagesDeltaOnly = true;
+      trimmed = true;
+    }
+    return trimmed;
+  }
+
+  private forgetMessageStreams(conversationId: string): void {
+    const prefix = `${conversationId}\u0000`;
+    for (const key of this.messageStreams.keys()) {
+      if (key.startsWith(prefix)) this.messageStreams.delete(key);
     }
   }
 

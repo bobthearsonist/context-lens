@@ -95,6 +95,8 @@ export interface ContextInfo {
   systemPrompts: SystemPrompt[];
   tools: Tool[];
   messages: ParsedMessage[];
+  /** Older stored turns hold only the messages new at that turn, not the full window. */
+  messagesDeltaOnly?: boolean;
 }
 
 // --- Composition (from LHAR schema) ---

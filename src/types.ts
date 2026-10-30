@@ -93,6 +93,16 @@ export interface ContextInfo {
   systemPrompts: SystemPrompt[];
   tools: Tool[];
   messages: ParsedMessage[];
+  /**
+   * Stored entries only: indexes in `messages` of the messages that were not
+   * in the previous turn's capture.
+   */
+  newMessageIndexes?: number[];
+  /**
+   * Stored entries only: `messages` holds just the messages new at this turn,
+   * not the full window. Token totals still describe the whole request.
+   */
+  messagesDeltaOnly?: boolean;
 }
 
 // --- Source extraction ---
